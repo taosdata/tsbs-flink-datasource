@@ -1,0 +1,3 @@
+target/
+tsbs-flink-results.txt
+*.tar.gz
