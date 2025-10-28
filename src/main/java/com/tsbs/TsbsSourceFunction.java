@@ -173,7 +173,7 @@ public class TsbsSourceFunction extends RichSourceFunction<RowData> {
 
     private String safeGet(CSVRecord record, int index) {
         if (record == null || index >= record.size()) {
-            return "";
+            return null;
         }
         String value = record.get(index);
         return (value == null || value.trim().isEmpty() ||
@@ -182,7 +182,7 @@ public class TsbsSourceFunction extends RichSourceFunction<RowData> {
 
     private Double parseDouble(String value) {
         if (value == null || value.trim().isEmpty()) {
-            return 0.0;
+            return null;
         }
         try {
             return Double.parseDouble(value.trim());
@@ -194,14 +194,14 @@ public class TsbsSourceFunction extends RichSourceFunction<RowData> {
 
     private StringData parseString(String value) {
         if (value == null || value.trim().isEmpty()) {
-            return StringData.fromString("");
+            return null;
         }
         return StringData.fromString(value.trim().replace("\"", ""));
     }
 
     private TimestampData parseTimestamp(String timestampStr, DateTimeFormatter formatter) {
         if (timestampStr == null || timestampStr.trim().isEmpty()) {
-            return TimestampData.fromLocalDateTime(LocalDateTime.now());
+            return null;
         }
         try {
             LocalDateTime localDateTime = LocalDateTime.parse(timestampStr, formatter);
