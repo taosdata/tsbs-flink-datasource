@@ -134,51 +134,82 @@ public class TsbsSourceFunction extends RichSourceFunction<RowData> {
     }
 
     private RowData parseRecordToRowData(CSVRecord record, DateTimeFormatter formatter) {
-        // Parse timestamp (index 0)
-        final String timestampStr = record.get(0).trim().replace("\"", ""); // 去除可能的前后空格
-        final LocalDateTime localDateTime = LocalDateTime.parse(timestampStr, formatter);
-        final TimestampData timestampData = TimestampData.fromLocalDateTime(localDateTime);
-
-        // Parse numeric fields (indices 1-7, 13-15)
-        final double latitude = Double.parseDouble(record.get(1).trim());
-        final double longitude = Double.parseDouble(record.get(2).trim());
-        final double elevation = Double.parseDouble(record.get(3).trim());
-        final double velocity = Double.parseDouble(record.get(4).trim());
-        final double heading = Double.parseDouble(record.get(5).trim());
-        final double grade = Double.parseDouble(record.get(6).trim());
-        final double fuelConsumption = Double.parseDouble(record.get(7).trim());
-        final double loadCapacity = Double.parseDouble(record.get(13).trim());
-        final double fuelCapacity = Double.parseDouble(record.get(14).trim());
-        final double nominalFuelConsumption = Double.parseDouble(record.get(15).trim());
-
-        // Parse string fields (indices 8-12)
-        final String name = record.get(8).trim().replace("\"", "");
-        final String fleet = record.get(9).trim().replace("\"", "");
-        final String driver = record.get(10).trim().replace("\"", "");
-        final String model = record.get(11).trim().replace("\"", "");
-        final String deviceVersion = record.get(12).trim().replace("\"", "");
-
         // Create GenericRowData with 16 fields
         final org.apache.flink.table.data.GenericRowData rowData = new org.apache.flink.table.data.GenericRowData(16);
 
-        // Set fields (order exactly matches table creation statement)
-        rowData.setField(0, timestampData); // ts
-        rowData.setField(1, latitude); // latitude
-        rowData.setField(2, longitude); // longitude
-        rowData.setField(3, elevation); // elevation
-        rowData.setField(4, velocity); // velocity
-        rowData.setField(5, heading); // heading
-        rowData.setField(6, grade); // grade
-        rowData.setField(7, fuelConsumption); // fuel_consumption
-        rowData.setField(8, StringData.fromString(name)); // name
-        rowData.setField(9, StringData.fromString(fleet)); // fleet
-        rowData.setField(10, StringData.fromString(driver)); // driver
-        rowData.setField(11, StringData.fromString(model)); // model
-        rowData.setField(12, StringData.fromString(deviceVersion)); // device_version
-        rowData.setField(13, loadCapacity); // load_capacity
-        rowData.setField(14, fuelCapacity); // fuel_capacity
-        rowData.setField(15, nominalFuelConsumption); // nominal_fuel_consumption
+        try {
+            // Parse timestamp (index 0)
+            final String timestampStr = safeGet(record, 0).trim().replace("\"", "");
+            final TimestampData timestampData = parseTimestamp(timestampStr, formatter);
+            rowData.setField(0, timestampData);
+
+            // Parse numeric fields (indices 1-7, 13-15)
+            rowData.setField(1, parseDouble(safeGet(record, 1))); // latitude
+            rowData.setField(2, parseDouble(safeGet(record, 2))); // longitude
+            rowData.setField(3, parseDouble(safeGet(record, 3))); // elevation
+            rowData.setField(4, parseDouble(safeGet(record, 4))); // velocity
+            rowData.setField(5, parseDouble(safeGet(record, 5))); // heading
+            rowData.setField(6, parseDouble(safeGet(record, 6))); // grade
+            rowData.setField(7, parseDouble(safeGet(record, 7))); // fuel_consumption
+            rowData.setField(13, parseDouble(safeGet(record, 13))); // load_capacity
+            rowData.setField(14, parseDouble(safeGet(record, 14))); // fuel_capacity
+            rowData.setField(15, parseDouble(safeGet(record, 15))); // nominal_fuel_consumption
+
+            // Create GenericRowData with 16 fields
+            rowData.setField(8, parseString(safeGet(record, 8))); // name
+            rowData.setField(9, parseString(safeGet(record, 9))); // fleet
+            rowData.setField(10, parseString(safeGet(record, 10))); // driver
+            rowData.setField(11, parseString(safeGet(record, 11))); // model
+            rowData.setField(12, parseString(safeGet(record, 12))); // device_version
+
+        } catch (Exception e) {
+            System.err.println("Failed to parse record: " + record.toString());
+            e.printStackTrace();
+            return null;
+        }
+
         return rowData;
+    }
+
+    private String safeGet(CSVRecord record, int index) {
+        if (record == null || index >= record.size()) {
+            return "";
+        }
+        String value = record.get(index);
+        return (value == null || value.trim().isEmpty() ||
+                "null".equalsIgnoreCase(value) || "NULL".equalsIgnoreCase(value)) ? "" : value;
+    }
+
+    private Double parseDouble(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            return 0.0;
+        }
+        try {
+            return Double.parseDouble(value.trim());
+        } catch (NumberFormatException e) {
+            System.err.println("Failed to parse double from: '" + value + "'");
+            return 0.0;
+        }
+    }
+
+    private StringData parseString(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            return StringData.fromString("");
+        }
+        return StringData.fromString(value.trim().replace("\"", ""));
+    }
+
+    private TimestampData parseTimestamp(String timestampStr, DateTimeFormatter formatter) {
+        if (timestampStr == null || timestampStr.trim().isEmpty()) {
+            return TimestampData.fromLocalDateTime(LocalDateTime.now());
+        }
+        try {
+            LocalDateTime localDateTime = LocalDateTime.parse(timestampStr, formatter);
+            return TimestampData.fromLocalDateTime(localDateTime);
+        } catch (Exception e) {
+            System.err.println("Failed to parse timestamp: '" + timestampStr + "'");
+            return TimestampData.fromLocalDateTime(LocalDateTime.now());
+        }
     }
 
     @Override
