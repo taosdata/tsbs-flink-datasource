@@ -4,10 +4,9 @@ testCases:
     description: ""
     sql: |
       SELECT
-          TUMBLE_START(ts, INTERVAL '1' HOUR) AS window_start,
-          TUMBLE_END(ts, INTERVAL '1' HOUR) AS window_end, 
-          AVG(fuel_consumption) AS avg_fuel_consumption 
+          TUMBLE_END(ts, INTERVAL '1' HOUR) AS window_end,
+          AVG(fuel_consumption) AS avg_fuel_consumption
       FROM
-          tsbs_readings
+          readings
       GROUP BY
-          TUMBLE(ts, INTERVAL '1' HOUR); 
+          TUMBLE(ts, INTERVAL '1' HOUR)

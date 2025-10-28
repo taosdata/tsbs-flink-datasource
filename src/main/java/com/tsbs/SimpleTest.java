@@ -24,7 +24,7 @@ public class SimpleTest {
                 StreamTableEnvironment tableEnv = StreamTableEnvironment.create(env);
                 env.setParallelism(1);
 
-                String createTableDDL = "CREATE TABLE tsbs_readings (\n" +
+                String createTableDDL = "CREATE TABLE readings (\n" +
                                 "    `ts` TIMESTAMP(3),\n" +
                                 "    latitude DOUBLE,\n" +
                                 "    longitude DOUBLE,\n" +
@@ -49,11 +49,11 @@ public class SimpleTest {
                 tableEnv.executeSql(createTableDDL);
 
                 System.out.println("=== Test Query ===");
-                // final String sql1 = "SELECT name, ts, fuel_consumption, velocity FROM tsbs_readings WHERE velocity is not null LIMIT 10";
-                final String sql2 = "SELECT AVG(fuel_consumption) AS avg_fuel_consumption FROM tsbs_readings where fuel_consumption is not null";
-                // final String sql_a1 = "SELECT TUMBLE_END(ts, INTERVAL '1' HOUR) AS ts, AVG(fuel_consumption) AS avg_fuel_consumption FROM tsbs_readings GROUP BY TUMBLE(ts, INTERVAL '1' HOUR)";
+                // final String sql1 = "SELECT name, ts, fuel_consumption, velocity FROM readings WHERE velocity is not null LIMIT 10";
+                // final String sql2 = "SELECT AVG(fuel_consumption) AS avg_fuel_consumption FROM readings";
+                final String sql_a1 = "SELECT TUMBLE_END(ts, INTERVAL '1' HOUR) AS ts, AVG(fuel_consumption) AS avg_fuel_consumption FROM readings GROUP BY TUMBLE(ts, INTERVAL '1' HOUR)";
                 
-                TableResult projectQuery = tableEnv.executeSql(sql2);
+                TableResult projectQuery = tableEnv.executeSql(sql_a1);
                 projectQuery.print();
         }
 }
