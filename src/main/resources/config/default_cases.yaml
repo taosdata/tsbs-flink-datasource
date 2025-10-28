@@ -3,24 +3,11 @@ testCases:
     classfication: "Comprehensive"
     description: ""
     sql: |
-      SELECT 
-          name, 
-          ts, 
-          fuel_consumption,
-          velocity 
-      FROM tsbs_readings 
-      LIMIT 10
-  - scenarioId: "A2"
-    classfication: "Fleet"
-    description: ""
-    sql: |
-      SELECT * 
-      FROM tsbs_readings 
-      LIMIT 10
-  - scenarioId: "A3"
-    classfication: "Vehicle"
-    description: ""
-    sql: |
-      SELECT name, avg(fuel_consumption)
-      FROM tsbs_readings 
-      GROUP BY name
+      SELECT
+          TUMBLE_START(ts, INTERVAL '1' HOUR) AS window_start,
+          TUMBLE_END(ts, INTERVAL '1' HOUR) AS window_end, 
+          AVG(fuel_consumption) AS avg_fuel_consumption 
+      FROM
+          tsbs_readings
+      GROUP BY
+          TUMBLE(ts, INTERVAL '1' HOUR); 
