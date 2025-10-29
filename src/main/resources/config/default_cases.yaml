@@ -10,3 +10,45 @@ testCases:
           readings
       GROUP BY
           TUMBLE(ts, INTERVAL '1' HOUR)
+  - scenarioId: "A2"
+    classfication: "Comprehensive"
+    description: ""
+    sql: |
+      SELECT
+          window_end AS calculation_time,
+          COUNT(*) AS vehicle_count,
+          AVG(last_fuel_consumption) AS avg_fuel_consumption
+      FROM (
+          SELECT
+              name,
+              TUMBLE_END(ts, INTERVAL '1' MINUTE) AS window_end,
+              LAST_VALUE(grade) AS last_grade,
+              LAST_VALUE(fuel_consumption) AS last_fuel_consumption
+          FROM readings
+          GROUP BY 
+              TUMBLE(ts, INTERVAL '1' MINUTE),
+              name
+      ) 
+      WHERE last_grade > 70
+      GROUP BY window_end;
+  - scenarioId: "A3"
+    classfication: "Comprehensive"
+    description: ""
+    sql: |
+      SELECT
+          window_end AS calculation_time,
+          COUNT(*) AS vehicle_count,
+          AVG(avg_fuel) AS avg_fuel_consumption
+      FROM (
+          SELECT
+              name,
+              TUMBLE_END(ts, INTERVAL '1' MINUTE) AS window_end,
+              LAST_VALUE(elevation) AS last_elevation,
+              AVG(fuel_consumption) AS avg_fuel
+          FROM readings
+          GROUP BY 
+              TUMBLE(ts, INTERVAL '1' MINUTE),
+              name
+      ) 
+      WHERE last_elevation > 1000
+      GROUP BY window_end;
