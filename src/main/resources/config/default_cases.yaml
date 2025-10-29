@@ -1,54 +1,305 @@
 testCases:
-  - scenarioId: "A1"
-    classfication: "Comprehensive"
-    description: ""
-    sql: |
-      SELECT
-          TUMBLE_END(ts, INTERVAL '1' HOUR) AS window_end,
-          AVG(fuel_consumption) AS avg_fuel_consumption
-      FROM
-          readings
-      GROUP BY
-          TUMBLE(ts, INTERVAL '1' HOUR)
-  - scenarioId: "A2"
-    classfication: "Comprehensive"
-    description: ""
-    sql: |
-      SELECT
-          window_end AS calculation_time,
-          COUNT(*) AS vehicle_count,
-          AVG(last_fuel_consumption) AS avg_fuel_consumption
-      FROM (
+    - scenarioId: "A1"
+      classfication: "Comprehensive"
+      description: ""
+      sql: |
+          SELECT
+              TUMBLE_END(ts, INTERVAL '1' HOUR) AS window_end,
+              AVG(fuel_consumption) AS avg_fuel_consumption
+          FROM
+              readings
+          GROUP BY
+              TUMBLE(ts, INTERVAL '1' HOUR)
+    - scenarioId: "A2"
+      classfication: "Comprehensive"
+      description: ""
+      sql: |
+          SELECT
+              window_end AS calculation_time,
+              COUNT(*) AS vehicle_count,
+              AVG(last_fuel_consumption) AS avg_fuel_consumption
+          FROM (
+              SELECT
+                  name,
+                  TUMBLE_END(ts, INTERVAL '1' MINUTE) AS window_end,
+                  LAST_VALUE(grade) AS last_grade,
+                  LAST_VALUE(fuel_consumption) AS last_fuel_consumption
+              FROM readings
+              GROUP BY 
+                  TUMBLE(ts, INTERVAL '1' MINUTE),
+                  name
+          ) 
+          WHERE last_grade > 70
+          GROUP BY window_end;
+    - scenarioId: "A3"
+      classfication: "Comprehensive"
+      description: ""
+      sql: |
+          SELECT
+              window_end AS calculation_time,
+              COUNT(*) AS vehicle_count,
+              AVG(avg_fuel) AS avg_fuel_consumption
+          FROM (
+              SELECT
+                  name,
+                  TUMBLE_END(ts, INTERVAL '1' MINUTE) AS window_end,
+                  LAST_VALUE(elevation) AS last_elevation,
+                  AVG(fuel_consumption) AS avg_fuel
+              FROM readings
+              GROUP BY 
+                  TUMBLE(ts, INTERVAL '1' MINUTE),
+                  name
+          ) 
+          WHERE last_elevation > 1000
+          GROUP BY window_end;
+    - scenarioId: "A4"
+      classfication: "Comprehensive"
+      description: ""
+      sql: |
+          SELECT
+                window_end AS calculation_time,
+                SUM(last_load) AS total_load
+            FROM (
+                SELECT
+                    name,
+                    TUMBLE_END(ts, INTERVAL '10' MINUTE) AS window_end,
+                    LAST_VALUE(current_load) AS last_load
+                FROM diagnostics
+                GROUP BY
+                    TUMBLE(ts, INTERVAL '10' MINUTE),
+                    name
+            )
+            GROUP BY window_end;
+    - scenarioId: "A5"
+      classfication: "Comprehensive"
+      description: ""
+      sql: |
+          SELECT
+              window_end AS calculation_time,
+              direction,
+              COUNT(*) AS vehicle_count
+          FROM (
+              SELECT
+                  name,
+                  window_end,
+                  CASE
+                      WHEN last_heading < 45 OR last_heading >= 315 THEN 0
+                      WHEN last_heading >= 45 AND last_heading < 135 THEN 90
+                      WHEN last_heading >= 135 AND last_heading < 225 THEN 180
+                      ELSE 270
+                  END AS direction
+              FROM (
+                  SELECT
+                      name,
+                      TUMBLE_END(ts, INTERVAL '10' MINUTE) AS window_end,
+                      LAST_VALUE(heading) AS last_heading
+                  FROM readings
+                  GROUP BY
+                      TUMBLE(ts, INTERVAL '10' MINUTE),
+                      name
+              )
+          )
+          GROUP BY
+              window_end,
+              direction;
+    - scenarioId: "A6"
+      classfication: "Comprehensive"
+      description: ""
+      sql: |
+          SELECT
+              window_end AS calculation_time,
+              COUNT(*) AS vehicle_count,
+              AVG(last_velocity) AS avg_velocity
+          FROM (
+              SELECT
+                  a.window_end,
+                  b.last_velocity
+              FROM (
+                  SELECT
+                      name,
+                      TUMBLE_END(ts, INTERVAL '1' HOUR) AS window_end,
+                      LAST_VALUE(current_load) AS last_load,
+                      LAST_VALUE(load_capacity) AS last_load_capacity
+                  FROM diagnostics
+                  GROUP BY
+                      TUMBLE(ts, INTERVAL '1' HOUR),
+                      name
+              ) a
+              JOIN (
+                  SELECT
+                      name,
+                      TUMBLE_END(ts, INTERVAL '1' HOUR) AS window_end,
+                      LAST_VALUE(velocity) AS last_velocity
+                  FROM readings
+                  GROUP BY
+                      TUMBLE(ts, INTERVAL '1' HOUR),
+                      name
+              ) b
+              ON a.name = b.name AND a.window_end = b.window_end
+              WHERE a.last_load < 0.1 * a.last_load_capacity
+          )
+          GROUP BY window_end;
+    - scenarioId: "A7"
+      classfication: "Comprehensive"
+      description: ""
+      sql: |
+          SELECT
+              TUMBLE_START(ts, INTERVAL '1' DAY) AS calculation_time,
+              AVG(fuel_consumption) AS avg_fuel_consumption
+          FROM readings
+          GROUP BY TUMBLE(ts, INTERVAL '1' DAY);
+    - scenarioId: "A8"
+      classfication: "Comprehensive"
+      description: ""
+      sql: |
+          SELECT
+              TUMBLE_START(fault_end, INTERVAL '1' DAY) AS calculation_time,
+              SUM(TIMESTAMPDIFF(SECOND, fault_start, fault_end)) / 3600.0 AS total_fault_hours
+          FROM (
+              SELECT
+                  name,
+                  fault_start,
+                  fault_end
+              FROM diagnostics
+              MATCH_RECOGNIZE (
+                  PARTITION BY name
+                  ORDER BY ts
+                  MEASURES
+                      START_ROW.ts AS fault_start,
+                      END_ROW.ts AS fault_end
+                  ONE ROW PER MATCH
+                  AFTER MATCH SKIP TO NEXT ROW
+                  PATTERN (START_ROW END_ROW)
+                  DEFINE
+                      START_ROW AS START_ROW.status > 0,
+                      END_ROW AS END_ROW.status = 0
+              )
+          )
+          GROUP BY TUMBLE(fault_end, INTERVAL '1' DAY);
+    - scenarioId: "A9"
+      classfication: "Comprehensive"
+      description: ""
+      sql: |
+          SELECT
+              window_start AS calculation_time,
+              COUNT(*) AS vehicle_count
+          FROM (
+              SELECT
+                  name,
+                  TUMBLE_START(fault_end, INTERVAL '1' DAY) AS window_start,
+                  SUM(TIMESTAMPDIFF(SECOND, fault_start, fault_end)) / 3600.0 AS total_fault_hours
+              FROM (
+                  SELECT
+                      name,
+                      fault_start,
+                      fault_end
+                  FROM diagnostics
+                  MATCH_RECOGNIZE (
+                      PARTITION BY name
+                      ORDER BY ts
+                      MEASURES
+                          START_ROW.ts AS fault_start,
+                          END_ROW.ts AS fault_end
+                      ONE ROW PER MATCH
+                      AFTER MATCH SKIP TO NEXT ROW
+                      PATTERN (START_ROW END_ROW) 
+                      DEFINE
+                          START_ROW AS START_ROW.status > 0,
+                          END_ROW AS END_ROW.status = 0
+                  )
+              )
+              GROUP BY
+                  name,
+                  TUMBLE(fault_end, INTERVAL '1' DAY)
+          )
+          WHERE total_fault_hours > 12.0
+          GROUP BY window_start;
+    - scenarioId: "T1"
+      classfication: "Comprehensive"
+      description: ""
+      sql: |
           SELECT
               name,
-              TUMBLE_END(ts, INTERVAL '1' MINUTE) AS window_end,
-              LAST_VALUE(grade) AS last_grade,
-              LAST_VALUE(fuel_consumption) AS last_fuel_consumption
+              TUMBLE_END(ts, INTERVAL '1' HOUR) AS calculation_time,
+              AVG(fuel_consumption) AS avg_fuel_consumption
           FROM readings
-          GROUP BY 
-              TUMBLE(ts, INTERVAL '1' MINUTE),
-              name
-      ) 
-      WHERE last_grade > 70
-      GROUP BY window_end;
-  - scenarioId: "A3"
-    classfication: "Comprehensive"
-    description: ""
-    sql: |
-      SELECT
-          window_end AS calculation_time,
-          COUNT(*) AS vehicle_count,
-          AVG(avg_fuel) AS avg_fuel_consumption
-      FROM (
+          GROUP BY
+              name,
+              TUMBLE(ts, INTERVAL '1' HOUR);
+    - scenarioId: "T2"
+      classfication: "Comprehensive"
+      description: ""
+      sql: |
           SELECT
               name,
-              TUMBLE_END(ts, INTERVAL '1' MINUTE) AS window_end,
-              LAST_VALUE(elevation) AS last_elevation,
-              AVG(fuel_consumption) AS avg_fuel
-          FROM readings
-          GROUP BY 
-              TUMBLE(ts, INTERVAL '1' MINUTE),
-              name
-      ) 
-      WHERE last_elevation > 1000
-      GROUP BY window_end;
+              TUMBLE_END(end_time, INTERVAL '1' HOUR) AS calculation_time,
+              SUM(TIMESTAMPDIFF(SECOND, start_time, end_time)) AS total_stop_time_seconds
+          FROM (
+              SELECT
+                  name,
+                  start_time,
+                  end_time
+              FROM readings
+              MATCH_RECOGNIZE (
+                  PARTITION BY name
+                  ORDER BY ts
+                  MEASURES
+                      START_ROW.ts AS start_time,
+                      END_ROW.ts AS end_time     
+                  ONE ROW PER MATCH
+                  AFTER MATCH SKIP TO NEXT ROW
+                  PATTERN (START_ROW END_ROW)      
+                  DEFINE
+                      START_ROW AS START_ROW.velocity = 0, 
+                      END_ROW AS END_ROW.velocity > 0  
+              )
+          )
+          GROUP BY name, TUMBLE(end_time, INTERVAL '1' HOUR);
+    - scenarioId: "T3"
+      classfication: "Comprehensive"
+      description: ""
+      sql: |
+          SELECT
+              name,
+              slope_interval,
+              (sum_s_fuel + sum_c_fuel) / (count_s + count_c) AS avg_fuel_consumption,
+              (sum_s_velocity + sum_c_velocity) / (count_s + count_c) AS avg_velocity,
+              segment_start,
+              segment_end,
+              (count_s + count_c) AS data_points
+          FROM (
+              SELECT
+                  name,
+                  ts,
+                  fuel_consumption,
+                  velocity,
+                  grade,
+                  CASE 
+                      WHEN grade <= 30 THEN 0
+                      WHEN grade <= 70 THEN 1
+                      ELSE 2
+                  END AS slope_interval
+              FROM readings
+              WHERE grade IS NOT NULL
+          )
+          MATCH_RECOGNIZE (
+              PARTITION BY name
+              ORDER BY ts
+              MEASURES
+                  FIRST(S.ts) AS segment_start,
+                  LAST(E.ts) AS segment_end,
+                  SUM(S.fuel_consumption) AS sum_s_fuel,
+                  SUM(C.fuel_consumption) AS sum_c_fuel,
+                  SUM(S.velocity) AS sum_s_velocity,
+                  SUM(C.velocity) AS sum_c_velocity,
+                  COUNT(S.ts) AS count_s,
+                  COUNT(C.ts) AS count_c,
+                  S.slope_interval AS slope_interval
+              ONE ROW PER MATCH
+              AFTER MATCH SKIP TO LAST E
+              PATTERN (S C* E)
+              DEFINE
+                  S AS (S.slope_interval IS NOT NULL),
+                  C AS (C.slope_interval = S.slope_interval),
+                  E AS (E.slope_interval <> S.slope_interval OR E.slope_interval IS NULL)
+          )
