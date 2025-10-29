@@ -24,6 +24,12 @@ public class TsbsTableFactory implements DynamicTableSourceFactory {
             .defaultValue(-1)
             .withDescription("Maximum number of records to read per second. Default is unlimited.");
 
+    public static final ConfigOption<String> DATA_TYPE = ConfigOptions
+            .key("data-type")
+            .stringType()
+            .defaultValue("readings")
+            .withDescription("Type of data: 'readings' or 'diagnostics'");
+
     @Override
     public String factoryIdentifier() {
         return IDENTIFIER;
@@ -40,6 +46,7 @@ public class TsbsTableFactory implements DynamicTableSourceFactory {
     public Set<ConfigOption<?>> optionalOptions() {
         final Set<ConfigOption<?>> options = new HashSet<>();
         options.add(RECORDS_PER_SECOND);
+        options.add(DATA_TYPE);
         return options;
     }
 
@@ -49,9 +56,10 @@ public class TsbsTableFactory implements DynamicTableSourceFactory {
         helper.validate();
         final String path = helper.getOptions().get(PATH);
         final Integer recordsPerSecond = helper.getOptions().get(RECORDS_PER_SECOND);
+        final String dataType = helper.getOptions().get(DATA_TYPE); // 获取数据类型
         final org.apache.flink.table.types.DataType producedDataType = context.getCatalogTable().getSchema()
                 .toPhysicalRowDataType();
 
-        return new TsbsTableSource(path, producedDataType, recordsPerSecond);
+        return new TsbsTableSource(path, producedDataType, recordsPerSecond, dataType);
     }
 }
