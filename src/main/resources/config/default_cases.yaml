@@ -1,6 +1,6 @@
 testCases:
     - scenarioId: "A1"
-      classfication: "Comprehensive"
+      classfication: "Summary"
       description: ""
       sql: |
           SELECT
@@ -11,7 +11,7 @@ testCases:
           GROUP BY
               TUMBLE(ts, INTERVAL '1' HOUR)
     - scenarioId: "A2"
-      classfication: "Comprehensive"
+      classfication: "Summary"
       description: ""
       sql: |
           SELECT
@@ -32,7 +32,7 @@ testCases:
           WHERE last_grade > 70
           GROUP BY window_end;
     - scenarioId: "A3"
-      classfication: "Comprehensive"
+      classfication: "Summary"
       description: ""
       sql: |
           SELECT
@@ -53,7 +53,7 @@ testCases:
           WHERE last_elevation > 1000
           GROUP BY window_end;
     - scenarioId: "A4"
-      classfication: "Comprehensive"
+      classfication: "Summary"
       description: ""
       sql: |
           SELECT
@@ -71,7 +71,7 @@ testCases:
             )
             GROUP BY window_end;
     - scenarioId: "A5"
-      classfication: "Comprehensive"
+      classfication: "Summary"
       description: ""
       sql: |
           SELECT
@@ -103,7 +103,7 @@ testCases:
               window_end,
               direction;
     - scenarioId: "A6"
-      classfication: "Comprehensive"
+      classfication: "Summary"
       description: ""
       sql: |
           SELECT
@@ -140,7 +140,7 @@ testCases:
           )
           GROUP BY window_end;
     - scenarioId: "A7"
-      classfication: "Comprehensive"
+      classfication: "Summary"
       description: ""
       sql: |
           SELECT
@@ -149,7 +149,7 @@ testCases:
           FROM readings
           GROUP BY TUMBLE(ts, INTERVAL '1' DAY);
     - scenarioId: "A8"
-      classfication: "Comprehensive"
+      classfication: "Summary"
       description: ""
       sql: |
           SELECT
@@ -177,7 +177,7 @@ testCases:
           )
           GROUP BY TUMBLE(fault_end, INTERVAL '1' DAY);
     - scenarioId: "A9"
-      classfication: "Comprehensive"
+      classfication: "Summary"
       description: ""
       sql: |
           SELECT
@@ -214,8 +214,48 @@ testCases:
           )
           WHERE total_fault_hours > 12.0
           GROUP BY window_start;
+    - scenarioId: "F1"
+      classfication: "Fleet"
+      description: ""
+      sql: |
+          SELECT
+    - scenarioId: "F2"
+      classfication: "Fleet"
+      description: ""
+      sql: |
+          SELECT
+    - scenarioId: "F3"
+      classfication: "Fleet"
+      description: ""
+      sql: |
+          SELECT
+    - scenarioId: "F4"
+      classfication: "Fleet"
+      description: ""
+      sql: |
+          SELECT
+    - scenarioId: "F5"
+      classfication: "Fleet"
+      description: ""
+      sql: |
+          SELECT
+    - scenarioId: "F6"
+      classfication: "Fleet"
+      description: ""
+      sql: |
+          SELECT
+    - scenarioId: "F7"
+      classfication: "Fleet"
+      description: ""
+      sql: |
+          SELECT
+    - scenarioId: "F8"
+      classfication: "Fleet"
+      description: ""
+      sql: |
+          SELECT
     - scenarioId: "T1"
-      classfication: "Comprehensive"
+      classfication: "Vehicle"
       description: ""
       sql: |
           SELECT
@@ -227,7 +267,7 @@ testCases:
               name,
               TUMBLE(ts, INTERVAL '1' HOUR);
     - scenarioId: "T2"
-      classfication: "Comprehensive"
+      classfication: "Vehicle"
       description: ""
       sql: |
           SELECT
@@ -256,14 +296,14 @@ testCases:
           )
           GROUP BY name, TUMBLE(end_time, INTERVAL '1' HOUR);
     - scenarioId: "T3"
-      classfication: "Comprehensive"
+      classfication: "Vehicle"
       description: ""
       sql: |
           SELECT
               name,
               slope_interval,
-              (sum_s_fuel + sum_c_fuel) / (count_s + count_c) AS avg_fuel_consumption,
-              (sum_s_velocity + sum_c_velocity) / (count_s + count_c) AS avg_velocity,
+              (COALESCE(sum_s_fuel, 0) + COALESCE(sum_c_fuel, 0))  / (count_s + count_c) AS avg_fuel_consumption,
+              (COALESCE(sum_s_velocity, 0) + COALESCE(sum_c_velocity, 0)) / (count_s + count_c) AS avg_velocity,
               segment_start,
               segment_end,
               (count_s + count_c) AS data_points
@@ -302,4 +342,272 @@ testCases:
                   S AS (S.slope_interval IS NOT NULL),
                   C AS (C.slope_interval = S.slope_interval),
                   E AS (E.slope_interval <> S.slope_interval OR E.slope_interval IS NULL)
+          )
+    - scenarioId: "T4"
+      classfication: "Vehicle"
+      description: ""
+      sql: |
+          SELECT
+              name,
+              velocity_interval,
+              (COALESCE(sum_s_fuel, 0) + COALESCE(sum_c_fuel, 0)) / (count_s + count_c) AS avg_fuel_consumption,
+              (COALESCE(sum_s_velocity, 0) + COALESCE(sum_c_velocity, 0)) / (count_s + count_c) AS avg_velocity,
+              segment_start,
+              segment_end,
+              (count_s + count_c) AS data_points
+          FROM (
+              SELECT
+                  name,
+                  ts,
+                  fuel_consumption,
+                  velocity,
+                  CASE 
+                      WHEN velocity <= 30 THEN 0
+                      WHEN velocity <= 70 THEN 1
+                      ELSE 2
+                  END AS velocity_interval
+              FROM readings
+              WHERE velocity IS NOT NULL
+          )
+          MATCH_RECOGNIZE (
+              PARTITION BY name
+              ORDER BY ts
+              MEASURES
+                  FIRST(S.ts) AS segment_start,
+                  LAST(E.ts) AS segment_end,
+                  SUM(S.fuel_consumption) AS sum_s_fuel,
+                  SUM(C.fuel_consumption) AS sum_c_fuel,
+                  SUM(S.velocity) AS sum_s_velocity,
+                  SUM(C.velocity) AS sum_c_velocity,
+                  COUNT(S.ts) AS count_s,
+                  COUNT(C.ts) AS count_c,
+                  S.velocity_interval AS velocity_interval
+              ONE ROW PER MATCH
+              AFTER MATCH SKIP TO LAST E
+              PATTERN (S C* E)
+              DEFINE
+                  S AS (S.velocity_interval IS NOT NULL),
+                  C AS (C.velocity_interval = S.velocity_interval),
+                  E AS (E.velocity_interval <> S.velocity_interval OR E.velocity_interval IS NULL)
+          )
+    - scenarioId: "T5"
+      classfication: "Vehicle"
+      description: ""
+      sql: |
+          SELECT
+              name,
+              fault_state,
+              segment_start,
+              segment_end,
+              avg_s_current_load as avg_current_load,
+              count_s AS data_points
+          FROM (
+              SELECT
+                  name,
+                  ts,
+                  current_load,
+                  CASE 
+                      WHEN `status` > 0 THEN 1
+                      ELSE 0
+                  END AS fault_state
+              FROM diagnostics
+              WHERE `status` IS NOT NULL AND current_load IS NOT NULL
+          )
+          MATCH_RECOGNIZE (
+              PARTITION BY name
+              ORDER BY ts
+              MEASURES
+                  FIRST(S.ts) AS segment_start,
+                  LAST(S.ts) AS segment_end,
+                  AVG(S.current_load) AS avg_s_current_load,
+                  COUNT(S.ts) AS count_s,
+                  S.fault_state AS fault_state
+              ONE ROW PER MATCH
+              AFTER MATCH SKIP PAST LAST ROW
+              PATTERN (S+ E)
+              DEFINE
+                  S AS (S.fault_state = 1),
+                  E AS (E.fault_state <> S.fault_state)
+          )
+    - scenarioId: "T6"
+      classfication: "Vehicle"
+      description: ""
+      sql: |
+          SELECT
+              segment_start,
+              segment_end,
+              TIMESTAMPDIFF(SECOND, segment_start, segment_end) as segment_duration,
+              name,
+              low_fuel_state,
+              avg_fuel_state,
+              data_points
+          FROM (
+              SELECT
+                  ts,
+                  name,
+                  fuel_state,
+                  fuel_capacity,
+                  CASE 
+                      WHEN fuel_state < 0.2 * fuel_capacity THEN 1
+                      ELSE 0
+                  END AS low_fuel_state
+              FROM diagnostics
+              WHERE fuel_state IS NOT NULL AND fuel_capacity IS NOT NULL AND fuel_capacity <> 0
+          )
+          MATCH_RECOGNIZE (
+              PARTITION BY name
+              ORDER BY ts
+              MEASURES
+                  FIRST(S.ts) AS segment_start,
+                  LAST(E.ts) AS segment_end,
+                  AVG(S.fuel_state / S.fuel_capacity) AS avg_fuel_state,
+                  COUNT(S.ts) AS data_points,
+                  S.low_fuel_state AS low_fuel_state
+              ONE ROW PER MATCH
+              AFTER MATCH SKIP PAST LAST ROW
+              PATTERN (S+ E)
+              DEFINE
+                  S AS (S.low_fuel_state = 1),
+                  E AS (E.low_fuel_state = 0)
+          )
+
+    - scenarioId: "T7"
+      classfication: "Vehicle"
+      description: ""
+      sql: |
+          SELECT
+              segment_start,
+              segment_end,
+              TIMESTAMPDIFF(SECOND, segment_start, segment_end) as segment_duration,
+              name,
+              fuel_consumption_severity,
+              avg_velocity,
+              avg_grade,
+              avg_elevation,
+              avg_load,
+              data_points
+          FROM (
+              SELECT
+                  ts,
+                  name,
+                  velocity,
+                  grade,
+                  elevation,
+                  fuel_consumption,
+                  nominal_fuel_consumption,
+                  CASE 
+                      WHEN fuel_consumption > 2 * nominal_fuel_consumption THEN 1
+                      ELSE 0
+                  END AS fuel_consumption_severity
+              FROM readings
+              WHERE fuel_consumption IS NOT NULL AND nominal_fuel_consumption IS NOT NULL
+          )
+          MATCH_RECOGNIZE (
+              PARTITION BY name
+              ORDER BY ts
+              MEASURES
+                  FIRST(S.ts) AS segment_start,
+                  LAST(E.ts) AS segment_end,
+                  AVG(S.velocity) AS avg_velocity,
+                  AVG(S.grade) AS avg_grade,
+                  AVG(S.elevation) AS avg_elevation,
+                  COUNT(S.ts) AS data_points,
+                  S.fuel_consumption_severity AS fuel_consumption_severity
+              ONE ROW PER MATCH
+              AFTER MATCH SKIP TO LAST E  
+              PATTERN (S+ E)
+              DEFINE
+                  S AS (S.fuel_consumption_severity = 1),
+                  E AS (E.fuel_consumption_severity = 0) 
+          ) AS match_result
+          JOIN LATERAL (
+              SELECT AVG(current_load) AS avg_load
+              FROM diagnostics
+              WHERE diagnostics.name = match_result.name 
+              AND diagnostics.ts >= match_result.segment_start 
+              AND diagnostics.ts <= match_result.segment_end
+          ) AS load_stats ON TRUE;
+
+    - scenarioId: "T8"
+      classfication: "Vehicle"
+      description: ""
+      sql: |
+          SELECT
+              segment_start,
+              segment_end,
+              TIMESTAMPDIFF(SECOND, segment_start, segment_end) AS duration_seconds,
+              name,
+              high_speed_high_grade_state
+              avg_fuel_consumption,
+              data_points
+          FROM (
+              SELECT
+                  ts,
+                  name,
+                  velocity,
+                  grade,
+                  fuel_consumption,
+                  CASE 
+                      WHEN velocity > 70 AND grade > 70 THEN 1
+                      ELSE 0
+                  END AS high_speed_high_grade_state
+              FROM readings
+              WHERE velocity IS NOT NULL AND grade IS NOT NULL AND fuel_consumption IS NOT NULL
+          )
+          MATCH_RECOGNIZE (
+              PARTITION BY name
+              ORDER BY ts
+              MEASURES
+                  FIRST(S.ts) AS segment_start,
+                  LAST(E.ts) AS segment_end,
+                  AVG(S.fuel_consumption) AS avg_fuel_consumption,
+                  COUNT(S.ts) AS data_points,
+                  S.high_speed_high_grade_state as high_speed_high_grade_state
+              ONE ROW PER MATCH
+              AFTER MATCH SKIP PAST LAST ROW
+              PATTERN (S+ E)
+              DEFINE
+                  S AS (S.high_speed_high_grade_state = 1),
+                  E AS (E.high_speed_high_grade_state = 0)
+          )
+    - scenarioId: "T9"
+      classfication: "Vehicle"
+      description: ""
+      sql: |
+          SELECT
+              segment_start,
+              segment_end,
+              TIMESTAMPDIFF(SECOND, segment_start, segment_end) AS duration_seconds,
+              name,
+              full_tank_state
+              first_current_load,
+              data_points
+          FROM (
+              SELECT
+                  ts,
+                  name,
+                  fuel_state,
+                  current_load,
+                  CASE 
+                      WHEN fuel_state = 1 THEN 1
+                      ELSE 0
+                  END AS full_tank_state
+              FROM diagnostics
+              WHERE fuel_state IS NOT NULL AND current_load IS NOT NULL
+          )
+          MATCH_RECOGNIZE (
+              PARTITION BY name
+              ORDER BY ts
+              MEASURES
+                  FIRST(S.ts) AS segment_start,
+                  LAST(E.ts) AS segment_end,
+                  FIRST(S.current_load) AS first_current_load,
+                  COUNT(S.ts) AS data_points,
+                  S.full_tank_state as full_tank_state
+              ONE ROW PER MATCH
+              AFTER MATCH SKIP PAST LAST ROW
+              PATTERN (S+ E)
+              DEFINE
+                  S AS (S.full_tank_state = 1),
+                  E AS (E.full_tank_state = 0)
           )
