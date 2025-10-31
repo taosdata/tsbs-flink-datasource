@@ -490,7 +490,7 @@ public class TsbsTest {
             outputManager.log("💻 Parallelism: " + env.getParallelism());
 
             // Create test table
-            String createTableDDL = "CREATE TABLE tsbs_readings (\n" +
+            String createTableDDL = "CREATE TABLE readings (\n" +
                     "    `ts` TIMESTAMP(3),\n" +
                     "    latitude DOUBLE,\n" +
                     "    longitude DOUBLE,\n" +

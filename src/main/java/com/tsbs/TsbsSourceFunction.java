@@ -16,15 +16,17 @@ public class TsbsSourceFunction extends RichSourceFunction<RowData> {
 
     private final String directoryPath;
     private final Integer recordsPerSecond;
+    private final String dataType;
     private volatile boolean isRunning = true;
 
     private transient long intervalStartTimeNs;
     private transient int recordsEmittedThisSecond;
     private final long targetIntervalNs = 1_000_000_000L; // Nanoseconds in 1 second
 
-    public TsbsSourceFunction(String directoryPath, Integer recordsPerSecond) {
+    public TsbsSourceFunction(String directoryPath, Integer recordsPerSecond, String dataType) {
         this.directoryPath = directoryPath;
         this.recordsPerSecond = recordsPerSecond;
+        this.dataType = dataType;
     }
 
     @Override
@@ -67,7 +69,6 @@ public class TsbsSourceFunction extends RichSourceFunction<RowData> {
                             // Parse and emit data
                             RowData rowData = parseRecordToRowData(record, formatter);
                             ctx.collect(rowData);
-
                             recordsEmittedThisSecond++;
                         }
                     } catch (Exception e) {
@@ -134,6 +135,17 @@ public class TsbsSourceFunction extends RichSourceFunction<RowData> {
     }
 
     private RowData parseRecordToRowData(CSVRecord record, DateTimeFormatter formatter) {
+        if ("readings".equalsIgnoreCase(dataType)) {
+            return parseReadingsRecord(record, formatter);
+        } else if ("diagnostics".equalsIgnoreCase(dataType)) {
+            return parseDiagnosticsRecord(record, formatter);
+        } else {
+            System.err.println("Unknown data type: " + dataType);
+            return null;
+        }
+    }
+
+    private RowData parseReadingsRecord(CSVRecord record, DateTimeFormatter formatter) {
         // Create GenericRowData with 16 fields
         final org.apache.flink.table.data.GenericRowData rowData = new org.apache.flink.table.data.GenericRowData(16);
 
@@ -171,18 +183,60 @@ public class TsbsSourceFunction extends RichSourceFunction<RowData> {
         return rowData;
     }
 
+    private RowData parseDiagnosticsRecord(CSVRecord record, DateTimeFormatter formatter) {
+        final org.apache.flink.table.data.GenericRowData rowData = new org.apache.flink.table.data.GenericRowData(12);
+
+        try {
+            final String timestampStr = safeGet(record, 0).trim().replace("\"", "");
+            final TimestampData timestampData = parseTimestamp(timestampStr, formatter);
+            rowData.setField(0, timestampData);
+
+            rowData.setField(1, parseDouble(safeGet(record, 1))); // fuel_state
+            rowData.setField(2, parseDouble(safeGet(record, 2))); // current_load
+            rowData.setField(3, parseLong(safeGet(record, 3))); // status
+            rowData.setField(9, parseDouble(safeGet(record, 9))); // load_capacity
+            rowData.setField(10, parseDouble(safeGet(record, 10))); // fuel_capacity
+            rowData.setField(11, parseDouble(safeGet(record, 11))); // nominal_fuel_consumption
+
+            rowData.setField(4, parseString(safeGet(record, 4))); // name
+            rowData.setField(5, parseString(safeGet(record, 5))); // fleet
+            rowData.setField(6, parseString(safeGet(record, 6))); // driver
+            rowData.setField(7, parseString(safeGet(record, 7))); // model
+            rowData.setField(8, parseString(safeGet(record, 8))); // device_version
+
+        } catch (Exception e) {
+            System.err.println("Failed to parse diagnostics record: " + record.toString());
+            e.printStackTrace();
+            return null;
+        }
+
+        return rowData;
+    }
+
     private String safeGet(CSVRecord record, int index) {
         if (record == null || index >= record.size()) {
-            return "";
+            return null;
         }
         String value = record.get(index);
         return (value == null || value.trim().isEmpty() ||
                 "null".equalsIgnoreCase(value) || "NULL".equalsIgnoreCase(value)) ? "" : value;
     }
 
+    private Long parseLong(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            return null;
+        }
+        try {
+            return Long.parseLong(value.trim());
+        } catch (NumberFormatException e) {
+            System.err.println("Failed to parse long from: '" + value + "'");
+            return 0L;
+        }
+    }
+
     private Double parseDouble(String value) {
         if (value == null || value.trim().isEmpty()) {
-            return 0.0;
+            return null;
         }
         try {
             return Double.parseDouble(value.trim());
@@ -194,14 +248,14 @@ public class TsbsSourceFunction extends RichSourceFunction<RowData> {
 
     private StringData parseString(String value) {
         if (value == null || value.trim().isEmpty()) {
-            return StringData.fromString("");
+            return null;
         }
         return StringData.fromString(value.trim().replace("\"", ""));
     }
 
     private TimestampData parseTimestamp(String timestampStr, DateTimeFormatter formatter) {
         if (timestampStr == null || timestampStr.trim().isEmpty()) {
-            return TimestampData.fromLocalDateTime(LocalDateTime.now());
+            return null;
         }
         try {
             LocalDateTime localDateTime = LocalDateTime.parse(timestampStr, formatter);

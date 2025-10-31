@@ -24,7 +24,7 @@ public class SimpleTest {
                 StreamTableEnvironment tableEnv = StreamTableEnvironment.create(env);
                 env.setParallelism(1);
 
-                String createTableDDL = "CREATE TABLE tsbs_readings (\n" +
+                String createReadingsTableDDL = "CREATE TABLE readings (\n" +
                                 "    `ts` TIMESTAMP(3),\n" +
                                 "    latitude DOUBLE,\n" +
                                 "    longitude DOUBLE,\n" +
@@ -41,19 +41,45 @@ public class SimpleTest {
                                 "    load_capacity DOUBLE,\n" +
                                 "    fuel_capacity DOUBLE,\n" +
                                 "    nominal_fuel_consumption DOUBLE,\n" +
-                                "    WATERMARK FOR ts AS ts - INTERVAL '0' SECOND\n" +
+                                "    WATERMARK FOR ts AS ts - INTERVAL '60' MINUTE\n" +
                                 ") WITH (\n" +
                                 "    'connector' = 'tsbs',\n" +
-                                "    'path' = 'file:///root/tsbs-flink-datasource/src/main/resources/data/default_data.csv'\n" +
+                                "    'data-type' = 'readings',\n" +
+                                "    'path' = 'file:///root/tsbs-flink-datasource/src/main/resources/data/default_readings.csv'\n"
+                                +
                                 ")";
-                tableEnv.executeSql(createTableDDL);
+                tableEnv.executeSql(createReadingsTableDDL);
 
-                System.out.println("=== Test Query ===");
-                // final String sql1 = "SELECT name, ts, fuel_consumption, velocity FROM tsbs_readings WHERE velocity is not null LIMIT 10";
-                final String sql2 = "SELECT AVG(fuel_consumption) AS avg_fuel_consumption FROM tsbs_readings where fuel_consumption is not null";
-                // final String sql_a1 = "SELECT TUMBLE_END(ts, INTERVAL '1' HOUR) AS ts, AVG(fuel_consumption) AS avg_fuel_consumption FROM tsbs_readings GROUP BY TUMBLE(ts, INTERVAL '1' HOUR)";
-                
-                TableResult projectQuery = tableEnv.executeSql(sql2);
+                String createDiagnosticsTableDDL = "CREATE TABLE diagnostics (\n" +
+                                "    ts TIMESTAMP(3),\n" +
+                                "    fuel_state DOUBLE,\n" +
+                                "    current_load DOUBLE,\n" +
+                                "    status BIGINT,\n" +
+                                "    name VARCHAR(30),\n" +
+                                "    fleet VARCHAR(30),\n" +
+                                "    driver VARCHAR(30),\n" +
+                                "    model VARCHAR(30),\n" +
+                                "    device_version VARCHAR(30),\n" +
+                                "    load_capacity DOUBLE,\n" +
+                                "    fuel_capacity DOUBLE,\n" +
+                                "    nominal_fuel_consumption DOUBLE,\n" +
+                                "    WATERMARK FOR ts AS ts - INTERVAL '60' MINUTE\n" +
+                                ") WITH (\n" +
+                                "    'connector' = 'tsbs',\n" + //
+                                "    'data-type' = 'diagnostics',\n" +
+                                "    'path' = 'file:///root/tsbs-flink-datasource/src/main/resources/data/default_diagnostics.csv'\n"
+                                +
+                                ");";
+                tableEnv.executeSql(createDiagnosticsTableDDL);
+
+                // String sql = "SELECT * FROM readings LIMIT 10";
+                // String sql = "SELECT AVG(fuel_consumption) FROM readings";
+                String sql = "SELECT * FROM diagnostics";
+
+                sql = sql.replace("\n", " ").replace("\r", " ").replaceAll("\\s+", " ");
+                System.out.println(sql);
+
+                TableResult projectQuery = tableEnv.executeSql(sql);
                 projectQuery.print();
         }
 }

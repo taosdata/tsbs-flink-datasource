@@ -10,12 +10,14 @@ public class TsbsTableSource implements ScanTableSource {
     private String path = "";
     private org.apache.flink.table.types.DataType producedDataType;
     private Integer recordsPerSecond;
+    private String dataType;
 
     public TsbsTableSource(String path, org.apache.flink.table.types.DataType producedDataType,
-            Integer recordsPerSecond) {
+            Integer recordsPerSecond, String dataType) {
         this.path = path;
         this.producedDataType = producedDataType;
         this.recordsPerSecond = recordsPerSecond;
+        this.dataType = dataType;
     }
 
     @Override
@@ -25,17 +27,18 @@ public class TsbsTableSource implements ScanTableSource {
 
     @Override
     public ScanRuntimeProvider getScanRuntimeProvider(ScanContext runtimeProviderContext) {
-        final TsbsSourceFunction sourceFunction = new TsbsSourceFunction(path, recordsPerSecond);
+        final TsbsSourceFunction sourceFunction = new TsbsSourceFunction(path, recordsPerSecond, dataType);
         return SourceFunctionProvider.of(sourceFunction, true);
     }
 
     @Override
     public DynamicTableSource copy() {
-        return new TsbsTableSource(path, producedDataType, recordsPerSecond);
+        return new TsbsTableSource(path, producedDataType, recordsPerSecond, dataType);
     }
 
     @Override
     public String asSummaryString() {
-        return "TsbsTableSource (rate: " + (recordsPerSecond > 0 ? recordsPerSecond + " records/s" : "unlimited") + ")";
+        return "TsbsTableSource (type: " + dataType +
+                ", rate: " + (recordsPerSecond > 0 ? recordsPerSecond + " records/s" : "unlimited") + ")";
     }
 }
