@@ -4,7 +4,7 @@ testCases:
       description: ""
       sql: |
           SELECT
-              TUMBLE_END(ts, INTERVAL '1' HOUR) AS window_end,
+              TUMBLE_END(ts, INTERVAL '1' HOUR) AS calculation_time,
               AVG(fuel_consumption) AS avg_fuel_consumption
           FROM
               readings
@@ -18,19 +18,19 @@ testCases:
           SELECT
               window_end AS calculation_time,
               COUNT(*) AS vehicle_count,
-              AVG(last_fuel_consumption) AS avg_fuel_consumption
+              AVG(cur_fuel_consumption) AS avg_fuel_consumption
           FROM (
               SELECT
                   name,
                   TUMBLE_END(ts, INTERVAL '1' MINUTE) AS window_end,
-                  LAST_VALUE(grade) AS last_grade,
-                  LAST_VALUE(fuel_consumption) AS last_fuel_consumption
+                  LAST_VALUE(fuel_consumption) AS cur_fuel_consumption,
+                  LAST_VALUE(grade) AS cur_grade
               FROM readings
               GROUP BY 
-                  TUMBLE(ts, INTERVAL '1' MINUTE),
-                  name
+                  name,
+                  TUMBLE(ts, INTERVAL '1' MINUTE)
           ) 
-          WHERE last_grade > 70
+          WHERE cur_grade > 70
           GROUP BY window_end;
 
     - scenarioId: "A3"
@@ -126,6 +126,8 @@ testCases:
                       LAST_VALUE(current_load) AS last_load,
                       LAST_VALUE(load_capacity) AS last_load_capacity
                   FROM diagnostics
+                  WHERE current_load IS NOT NULL 
+                      AND load_capacity IS NOT NULL
                   GROUP BY
                       TUMBLE(ts, INTERVAL '1' HOUR),
                       name
@@ -136,6 +138,7 @@ testCases:
                       TUMBLE_END(ts, INTERVAL '1' HOUR) AS window_end,
                       LAST_VALUE(velocity) AS last_velocity
                   FROM readings
+                  WHERE velocity IS NOT NULL
                   GROUP BY
                       TUMBLE(ts, INTERVAL '1' HOUR),
                       name
@@ -164,23 +167,28 @@ testCases:
               SUM(TIMESTAMPDIFF(SECOND, fault_start, fault_end)) / 3600.0 AS total_fault_hours
           FROM (
               SELECT
+                  ts,
                   name,
-                  fault_start,
-                  fault_end
+                  CASE 
+                      WHEN status > 0 THEN 1
+                      ELSE 0
+                  END AS fault_state
               FROM diagnostics
-              MATCH_RECOGNIZE (
-                  PARTITION BY name
-                  ORDER BY ts
-                  MEASURES
-                      START_ROW.ts AS fault_start,
-                      END_ROW.ts AS fault_end
-                  ONE ROW PER MATCH
-                  AFTER MATCH SKIP TO NEXT ROW
-                  PATTERN (START_ROW END_ROW)
-                  DEFINE
-                      START_ROW AS START_ROW.status > 0,
-                      END_ROW AS END_ROW.status = 0
-              )
+          )
+          MATCH_RECOGNIZE (
+              PARTITION BY name
+              ORDER BY ts
+              MEASURES
+                  FIRST(S.ts) AS fault_start,
+                  LAST(E.ts) AS fault_end,
+                  COUNT(S.ts) AS data_points,
+                  S.fault_state AS fault_state
+              ONE ROW PER MATCH
+              AFTER MATCH SKIP PAST LAST ROW
+              PATTERN (S+ E)
+              DEFINE
+                  S AS (S.fault_state = 1),
+                  E AS (E.fault_state = 0)
           )
           GROUP BY TUMBLE(fault_end, INTERVAL '1' DAY);
 
@@ -198,23 +206,28 @@ testCases:
                   SUM(TIMESTAMPDIFF(SECOND, fault_start, fault_end)) / 3600.0 AS total_fault_hours
               FROM (
                   SELECT
+                      ts,
                       name,
-                      fault_start,
-                      fault_end
+                      CASE 
+                          WHEN status > 0 THEN 1
+                          ELSE 0
+                      END AS fault_state
                   FROM diagnostics
-                  MATCH_RECOGNIZE (
-                      PARTITION BY name
-                      ORDER BY ts
-                      MEASURES
-                          START_ROW.ts AS fault_start,
-                          END_ROW.ts AS fault_end
-                      ONE ROW PER MATCH
-                      AFTER MATCH SKIP TO NEXT ROW
-                      PATTERN (START_ROW END_ROW) 
-                      DEFINE
-                          START_ROW AS START_ROW.status > 0,
-                          END_ROW AS END_ROW.status = 0
-                  )
+              )
+              MATCH_RECOGNIZE (
+                  PARTITION BY name
+                  ORDER BY ts
+                  MEASURES
+                      FIRST(S.ts) AS fault_start,
+                      LAST(E.ts) AS fault_end,
+                      COUNT(S.ts) AS data_points,
+                      S.fault_state AS fault_state
+                  ONE ROW PER MATCH
+                  AFTER MATCH SKIP PAST LAST ROW
+                  PATTERN (S+ E)
+                  DEFINE
+                      S AS (S.fault_state = 1),
+                      E AS (E.fault_state = 0)
               )
               GROUP BY
                   name,
