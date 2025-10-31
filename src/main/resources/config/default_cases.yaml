@@ -347,7 +347,7 @@ testCases:
                       name,
                       fleet,
                       CASE 
-                          WHEN `status` > 0 THEN 1
+                          WHEN status > 0 THEN 1
                           ELSE 0
                       END AS fault_state
                   FROM diagnostics
@@ -418,7 +418,7 @@ testCases:
                   name,
                   fleet,
                   CASE 
-                      WHEN LAST_VALUE(`status`) > 0 THEN 1 
+                      WHEN LAST_VALUE(status) > 0 THEN 1 
                       ELSE 0 
                   END AS breakdown,
                   window_end
@@ -426,12 +426,12 @@ testCases:
                   SELECT
                       name,
                       fleet,
-                      `status`,
+                      status,
                       ts,
                       window_start,
                       window_end
                   FROM TABLE(TUMBLE(TABLE diagnostics, DESCRIPTOR(ts), INTERVAL '1' HOUR))
-                  WHERE `status` IS NOT NULL 
+                  WHERE status IS NOT NULL 
               )
               GROUP BY name, fleet, window_end
           )
@@ -636,11 +636,11 @@ testCases:
                   ts,
                   current_load,
                   CASE 
-                      WHEN `status` > 0 THEN 1
+                      WHEN status > 0 THEN 1
                       ELSE 0
                   END AS fault_state
               FROM diagnostics
-              WHERE `status` IS NOT NULL AND current_load IS NOT NULL
+              WHERE status IS NOT NULL AND current_load IS NOT NULL
           )
           MATCH_RECOGNIZE (
               PARTITION BY name
