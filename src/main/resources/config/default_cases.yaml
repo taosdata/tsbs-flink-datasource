@@ -498,29 +498,34 @@ testCases:
       sql: |
           SELECT
               name,
-              TUMBLE_END(end_time, INTERVAL '1' HOUR) AS calculation_time,
-              SUM(TIMESTAMPDIFF(SECOND, start_time, end_time)) AS total_stop_time_seconds
+              TUMBLE_END(stop_end, INTERVAL '1' HOUR) AS calculation_time,
+              SUM(TIMESTAMPDIFF(SECOND, stop_start, stop_end)) AS total_stop_time_seconds
           FROM (
               SELECT
+                  ts,
                   name,
-                  start_time,
-                  end_time
+                  CASE 
+                      WHEN velocity = 0 THEN 1
+                      ELSE 0
+                  END AS stop_state
               FROM readings
-              MATCH_RECOGNIZE (
-                  PARTITION BY name
-                  ORDER BY ts
-                  MEASURES
-                      START_ROW.ts AS start_time,
-                      END_ROW.ts AS end_time     
-                  ONE ROW PER MATCH
-                  AFTER MATCH SKIP TO NEXT ROW
-                  PATTERN (START_ROW END_ROW)      
-                  DEFINE
-                      START_ROW AS START_ROW.velocity = 0, 
-                      END_ROW AS END_ROW.velocity > 0  
-              )
           )
-          GROUP BY name, TUMBLE(end_time, INTERVAL '1' HOUR);
+          MATCH_RECOGNIZE (
+              PARTITION BY name
+              ORDER BY ts
+              MEASURES
+                  FIRST(S.ts) AS stop_start,
+                  LAST(E.ts) AS stop_end,
+                  COUNT(S.ts) AS data_points,
+                  S.stop_state AS stop_state
+              ONE ROW PER MATCH
+              AFTER MATCH SKIP PAST LAST ROW
+              PATTERN (S+ E)
+              DEFINE
+                  S AS (S.stop_state = 1),
+                  E AS (E.stop_state = 0)
+          )
+          GROUP BY name, TUMBLE(stop_end, INTERVAL '1' HOUR);
 
     - scenarioId: "T3"
       classfication: "Vehicle"
@@ -547,7 +552,6 @@ testCases:
                       ELSE 2
                   END AS slope_interval
               FROM readings
-              WHERE grade IS NOT NULL
           )
           MATCH_RECOGNIZE (
               PARTITION BY name
@@ -595,7 +599,6 @@ testCases:
                       ELSE 2
                   END AS velocity_interval
               FROM readings
-              WHERE velocity IS NOT NULL
           )
           MATCH_RECOGNIZE (
               PARTITION BY name
@@ -640,7 +643,6 @@ testCases:
                       ELSE 0
                   END AS fault_state
               FROM diagnostics
-              WHERE status IS NOT NULL AND current_load IS NOT NULL
           )
           MATCH_RECOGNIZE (
               PARTITION BY name
@@ -682,7 +684,7 @@ testCases:
                       ELSE 0
                   END AS low_fuel_state
               FROM diagnostics
-              WHERE fuel_state IS NOT NULL AND fuel_capacity IS NOT NULL AND fuel_capacity <> 0
+              WHERE fuel_capacity <> 0
           )
           MATCH_RECOGNIZE (
               PARTITION BY name
@@ -730,7 +732,6 @@ testCases:
                       ELSE 0
                   END AS fuel_consumption_severity
               FROM readings
-              WHERE fuel_consumption IS NOT NULL AND nominal_fuel_consumption IS NOT NULL
           )
           MATCH_RECOGNIZE (
               PARTITION BY name
@@ -782,7 +783,6 @@ testCases:
                       ELSE 0
                   END AS high_speed_high_grade_state
               FROM readings
-              WHERE velocity IS NOT NULL AND grade IS NOT NULL AND fuel_consumption IS NOT NULL
           )
           MATCH_RECOGNIZE (
               PARTITION BY name
@@ -824,7 +824,6 @@ testCases:
                       ELSE 0
                   END AS full_tank_state
               FROM diagnostics
-              WHERE fuel_state IS NOT NULL AND current_load IS NOT NULL
           )
           MATCH_RECOGNIZE (
               PARTITION BY name
