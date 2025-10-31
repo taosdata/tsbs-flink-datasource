@@ -10,6 +10,7 @@ testCases:
               readings
           GROUP BY
               TUMBLE(ts, INTERVAL '1' HOUR)
+
     - scenarioId: "A2"
       classfication: "Summary"
       description: ""
@@ -31,6 +32,7 @@ testCases:
           ) 
           WHERE last_grade > 70
           GROUP BY window_end;
+
     - scenarioId: "A3"
       classfication: "Summary"
       description: ""
@@ -52,6 +54,7 @@ testCases:
           ) 
           WHERE last_elevation > 1000
           GROUP BY window_end;
+
     - scenarioId: "A4"
       classfication: "Summary"
       description: ""
@@ -70,6 +73,7 @@ testCases:
                     name
             )
             GROUP BY window_end;
+
     - scenarioId: "A5"
       classfication: "Summary"
       description: ""
@@ -102,6 +106,7 @@ testCases:
           GROUP BY
               window_end,
               direction;
+
     - scenarioId: "A6"
       classfication: "Summary"
       description: ""
@@ -139,6 +144,7 @@ testCases:
               WHERE a.last_load < 0.1 * a.last_load_capacity
           )
           GROUP BY window_end;
+
     - scenarioId: "A7"
       classfication: "Summary"
       description: ""
@@ -148,6 +154,7 @@ testCases:
               AVG(fuel_consumption) AS avg_fuel_consumption
           FROM readings
           GROUP BY TUMBLE(ts, INTERVAL '1' DAY);
+
     - scenarioId: "A8"
       classfication: "Summary"
       description: ""
@@ -176,6 +183,7 @@ testCases:
               )
           )
           GROUP BY TUMBLE(fault_end, INTERVAL '1' DAY);
+
     - scenarioId: "A9"
       classfication: "Summary"
       description: ""
@@ -214,46 +222,250 @@ testCases:
           )
           WHERE total_fault_hours > 12.0
           GROUP BY window_start;
+
     - scenarioId: "F1"
       classfication: "Fleet"
       description: ""
       sql: |
           SELECT
+              window_start,
+              window_end,
+              fleet,
+              COUNT(DISTINCT name) AS moving_trucks_count
+          FROM TABLE(
+              TUMBLE(TABLE readings, DESCRIPTOR(ts), INTERVAL '1' MINUTE)
+          )
+          WHERE velocity > 0 
+          GROUP BY window_start, window_end, fleet;
+
     - scenarioId: "F2"
       classfication: "Fleet"
       description: ""
       sql: |
           SELECT
+              window_start,
+              window_end,
+              fleet,
+              COUNT(DISTINCT name) AS faulty_trucks_count
+          FROM TABLE(
+              TUMBLE(TABLE diagnostics, DESCRIPTOR(ts), INTERVAL '1' MINUTE)
+          )
+          GROUP BY window_start, window_end, fleet;
+
     - scenarioId: "F3"
       classfication: "Fleet"
       description: ""
       sql: |
           SELECT
+              TUMBLE_START(ts, INTERVAL '1' HOUR) AS window_start,
+              TUMBLE_END(ts, INTERVAL '1' HOUR) AS window_end,
+              fleet,
+              AVG(fuel_consumption) AS avg_fuel_consumption,
+              COUNT(*) AS data_points
+          FROM readings
+          GROUP BY 
+              TUMBLE(ts, INTERVAL '1' HOUR),
+              fleet;
+
     - scenarioId: "F4"
       classfication: "Fleet"
       description: ""
       sql: |
-          SELECT
+          WITH avg_fuel_per_fleet AS (
+              SELECT 
+                  window_start,
+                  window_end,
+                  fleet,
+                  COALESCE(AVG(fuel_consumption), 0) AS avg_fuel
+              FROM TABLE(
+                  TUMBLE(TABLE readings, DESCRIPTOR(ts), INTERVAL '1' DAY)
+              )
+              WHERE fuel_consumption IS NOT NULL
+              GROUP BY window_start, window_end, fleet
+          ),
+          avg_load_per_fleet AS (
+              SELECT 
+                  window_start,
+                  window_end,
+                  fleet,
+                  COALESCE(AVG(current_load), 0) AS avg_load
+              FROM TABLE(
+                  TUMBLE(TABLE diagnostics, DESCRIPTOR(ts), INTERVAL '1' DAY)
+              )
+              WHERE current_load IS NOT NULL
+              GROUP BY window_start, window_end, fleet
+          )
+          SELECT 
+              a.window_start AS ts,
+              a.fleet,
+              CASE 
+                  WHEN a.avg_fuel > 0 THEN b.avg_load / a.avg_fuel
+                  ELSE 0 
+              END AS efficiency,
+              a.avg_fuel,
+              b.avg_load
+          FROM avg_fuel_per_fleet a
+          JOIN avg_load_per_fleet b ON 
+              a.window_start = b.window_start 
+              AND a.fleet = b.fleet;
+
     - scenarioId: "F5"
       classfication: "Fleet"
       description: ""
       sql: |
           SELECT
+              fleet,
+              TUMBLE_END(fault_end, INTERVAL '1' DAY) AS calculation_time,
+              SUM(TIMESTAMPDIFF(SECOND, fault_start, fault_end)) AS total_fault_time_seconds
+          FROM
+          (
+              SELECT
+                  fleet,
+                  name,
+                  fault_state,
+                  fault_start,
+                  fault_end,
+                  TIMESTAMPDIFF(SECOND, fault_start, fault_end) AS fault_duration,
+                  data_points
+              FROM
+              (
+                  SELECT
+                      ts,
+                      name,
+                      fleet,
+                      CASE 
+                          WHEN `status` > 0 THEN 1
+                          ELSE 0
+                      END AS fault_state
+                  FROM diagnostics
+              )
+              MATCH_RECOGNIZE
+              (
+                  PARTITION BY name
+                  ORDER BY ts
+                  MEASURES
+                      FIRST(S.ts) AS fault_start,
+                      LAST(E.ts) AS fault_end,
+                      COUNT(S.ts) AS data_points,
+                      S.fault_state AS fault_state,
+                      S.fleet AS fleet
+                  ONE ROW PER MATCH
+                  AFTER MATCH SKIP PAST LAST ROW
+                  PATTERN (S+ E)
+                  DEFINE
+                      S AS (S.fault_state = 1),
+                      E AS (E.fault_state = 0)
+              )
+          )
+          GROUP BY
+              fleet,
+              TUMBLE(fault_end, INTERVAL '1' DAY);
+
     - scenarioId: "F6"
       classfication: "Fleet"
       description: ""
       sql: |
           SELECT
+              name,
+              fleet,
+              load_capacity,
+              last_value(current_load) last_current_load,
+              window_end
+          FROM
+          (
+              SELECT
+                  name,
+                  fleet,
+                  load_capacity,
+                  current_load,
+                  ts,
+                  window_start,
+                  window_end
+              FROM TABLE(TUMBLE(TABLE diagnostics, DESCRIPTOR(ts), INTERVAL '1' HOUR))
+              WHERE current_load IS NOT NULL 
+              AND load_capacity IS NOT NULL
+              AND load_capacity > 0
+          ) GROUP BY name, fleet, load_capacity, window_end
+
     - scenarioId: "F7"
       classfication: "Fleet"
       description: ""
       sql: |
           SELECT
+              fleet,
+              window_end,
+              CASE 
+                  WHEN COUNT(*) > 0 THEN SUM(breakdown) / COUNT(*) 
+                  ELSE 0 
+              END AS fault_ratio,
+              COUNT(*) AS total_trucks, 
+              SUM(breakdown) AS faulty_trucks
+          FROM (
+              SELECT
+                  name,
+                  fleet,
+                  CASE 
+                      WHEN LAST_VALUE(`status`) > 0 THEN 1 
+                      ELSE 0 
+                  END AS breakdown,
+                  window_end
+              FROM (
+                  SELECT
+                      name,
+                      fleet,
+                      `status`,
+                      ts,
+                      window_start,
+                      window_end
+                  FROM TABLE(TUMBLE(TABLE diagnostics, DESCRIPTOR(ts), INTERVAL '1' HOUR))
+                  WHERE `status` IS NOT NULL 
+              )
+              GROUP BY name, fleet, window_end
+          )
+          GROUP BY fleet, window_end
+
     - scenarioId: "F8"
       classfication: "Fleet"
       description: ""
       sql: |
           SELECT
+              name,
+              fleet,
+              avg_fuel_consumption,
+              window_end,
+              rank_num
+          FROM (
+              SELECT
+                  name,
+                  fleet,
+                  avg_fuel_consumption,
+                  window_end,
+                  ROW_NUMBER() OVER (
+                      PARTITION BY fleet, window_end
+                      ORDER BY avg_fuel_consumption DESC
+                  ) AS rank_num
+              FROM (
+                  SELECT
+                      name,
+                      fleet,
+                      AVG(fuel_consumption) AS avg_fuel_consumption,
+                      window_end
+                  FROM (
+                      SELECT
+                          ts,
+                          name,
+                          fleet,
+                          fuel_consumption,
+                          window_start,
+                          window_end
+                      FROM TABLE(TUMBLE(TABLE readings, DESCRIPTOR(ts), INTERVAL '1' DAY))
+                      WHERE fuel_consumption IS NOT NULL 
+                  )
+                  GROUP BY name, fleet, window_end
+              )
+          )
+          WHERE rank_num <= 5
+
     - scenarioId: "T1"
       classfication: "Vehicle"
       description: ""
@@ -266,6 +478,7 @@ testCases:
           GROUP BY
               name,
               TUMBLE(ts, INTERVAL '1' HOUR);
+
     - scenarioId: "T2"
       classfication: "Vehicle"
       description: ""
@@ -295,6 +508,7 @@ testCases:
               )
           )
           GROUP BY name, TUMBLE(end_time, INTERVAL '1' HOUR);
+
     - scenarioId: "T3"
       classfication: "Vehicle"
       description: ""
@@ -342,7 +556,8 @@ testCases:
                   S AS (S.slope_interval IS NOT NULL),
                   C AS (C.slope_interval = S.slope_interval),
                   E AS (E.slope_interval <> S.slope_interval OR E.slope_interval IS NULL)
-          )
+          );
+
     - scenarioId: "T4"
       classfication: "Vehicle"
       description: ""
@@ -389,7 +604,8 @@ testCases:
                   S AS (S.velocity_interval IS NOT NULL),
                   C AS (C.velocity_interval = S.velocity_interval),
                   E AS (E.velocity_interval <> S.velocity_interval OR E.velocity_interval IS NULL)
-          )
+          );
+
     - scenarioId: "T5"
       classfication: "Vehicle"
       description: ""
@@ -428,7 +644,8 @@ testCases:
               DEFINE
                   S AS (S.fault_state = 1),
                   E AS (E.fault_state <> S.fault_state)
-          )
+          );
+
     - scenarioId: "T6"
       classfication: "Vehicle"
       description: ""
@@ -469,7 +686,7 @@ testCases:
               DEFINE
                   S AS (S.low_fuel_state = 1),
                   E AS (E.low_fuel_state = 0)
-          )
+          );
 
     - scenarioId: "T7"
       classfication: "Vehicle"
@@ -569,7 +786,8 @@ testCases:
               DEFINE
                   S AS (S.high_speed_high_grade_state = 1),
                   E AS (E.high_speed_high_grade_state = 0)
-          )
+          );
+
     - scenarioId: "T9"
       classfication: "Vehicle"
       description: ""
@@ -610,4 +828,4 @@ testCases:
               DEFINE
                   S AS (S.full_tank_state = 1),
                   E AS (E.full_tank_state = 0)
-          )
+          );
