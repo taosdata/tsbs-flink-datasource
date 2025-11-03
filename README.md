@@ -140,9 +140,6 @@ parallelism.default: 1
 # Web UI configuration
 rest.address: 0.0.0.0
 rest.bind-address: 0.0.0.0
-
-# for JAVA 17
-env.java.opts: "--add-exports java.base/sun.net.util=ALL-UNNAMED"
 ```
 
 # 4. Start Flink Cluster
@@ -212,7 +209,7 @@ git clone git@github.com:taosdata/tsbs-flink-datasource.git
 cd tsbs-flink-datasource
 
 # Compile project
-mvn clean package -f package/pom.xml
+mvn clean package -f package.pom.xml
 
 # Verify build result
 ls -la target/tsbs-flink-datasource-1.0-SNAPSHOT.jar
@@ -222,6 +219,8 @@ $FLINK_HOME/bin/flink run target/tsbs-flink-datasource-1.0-SNAPSHOT.jar --help
 ```
 
 # 6. Debug Custom Data Source via Flink SQL
+
+Open `$FLINK_HOME/bin/sql-client.sh` and execute the following SQL statements:
 
 ## 6.1 Register Custom Connector
 
