@@ -18,6 +18,7 @@ import java.nio.file.Paths;
 import java.text.SimpleDateFormat;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Collectors;
 
 public class TsbsTest {
 
@@ -25,11 +26,17 @@ public class TsbsTest {
      * Command Line Options Configuration Class
      */
     public static class CommandLineOptions {
-        @Parameter(names = { "-d", "--data" }, description = "Test data file path")
-        public String dataFilePath = null;
+        @Parameter(names = { "-d1", "--data1" }, description = "Test data file path for readings table")
+        public String dataFilePath1 = null;
+
+        @Parameter(names = { "-d2", "--data2" }, description = "Test data file path for diagnostics table")
+        public String dataFilePath2 = null;
 
         @Parameter(names = { "-c", "--config" }, description = "Test YAML configuration file path")
         public String configFilePath = null;
+
+        @Parameter(names = { "-s", "--scenario" }, description = "Execute specific scenario ID only")
+        public String scenarioId = null;
 
         @Parameter(names = { "-o", "--output" }, description = "Output results file path")
         public String outputFilePath = "./tsbs-flink-results.txt";
@@ -67,7 +74,7 @@ public class TsbsTest {
         }
 
         public void log(String message) {
-            String timestampedMessage = "[" + dateFormat.format(curDate) + "] " + message;
+            String timestampedMessage = "[" + dateFormat.format(new Date()) + "] " + message;
             System.out.println(timestampedMessage);
             fileWriter.println(timestampedMessage);
             fileWriter.flush();
@@ -233,7 +240,7 @@ public class TsbsTest {
 
         try {
             TableResult tableResult = tableEnv.executeSql(testCase.sql);
-            tableResult.await();
+            // tableResult.await();
 
             // Collect results and count
             try (CloseableIterator<org.apache.flink.types.Row> iterator = tableResult.collect()) {
@@ -241,13 +248,14 @@ public class TsbsTest {
                 outputManager.log("📊 Query results:");
                 while (iterator.hasNext()) {
                     org.apache.flink.types.Row row = iterator.next();
-                    outputManager.log("   " + row.toString());
-                    count++;
                     // Limit output rows to avoid log bloat
-                    if (count >= 5) {
+                    if (count < 5) {
+                        outputManager.log("   " + row.toString());
+                    } else if (count == 5) {
                         outputManager.log("   ... (more results omitted)");
-                        break;
+                    } else {
                     }
+                    count++;
                 }
                 result.recordsProcessed = count;
             }
@@ -282,17 +290,38 @@ public class TsbsTest {
      */
     public static TestSuiteSummary executeTestSuite(StreamTableEnvironment tableEnv,
             TestCaseConfig config,
-            OutputManager outputManager) {
+            OutputManager outputManager,
+            String specificScenarioId) {
         TestSuiteSummary summary = new TestSuiteSummary(System.currentTimeMillis());
         List<TestResult> results = new ArrayList<>();
 
+        List<TestCaseConfig.TestCase> testCasesToExecute = config.testCases;
+
+        if (specificScenarioId != null && !specificScenarioId.trim().isEmpty()) {
+            testCasesToExecute = config.testCases.stream()
+                    .filter(testCase -> specificScenarioId.equals(testCase.scenarioId))
+                    .collect(Collectors.toList());
+
+            if (testCasesToExecute.isEmpty()) {
+                outputManager.log("❌ No test case found with scenario ID: " + specificScenarioId);
+                outputManager.log("Available scenario IDs: " +
+                        config.testCases.stream().map(tc -> tc.scenarioId).collect(Collectors.toList()));
+                summary.totalEndTime = System.currentTimeMillis();
+                summary.totalDuration = summary.totalEndTime - summary.totalStartTime;
+                return summary;
+            }
+
+            outputManager.log("🎯 Executing specific scenario: " + specificScenarioId);
+            outputManager.log("📊 Filtered test cases: " + testCasesToExecute.size() + " (from total " +
+                    config.testCases.size() + ")");
+        }
+
         outputManager.log("🎯 Starting test suite execution");
-        outputManager.log("📈 Number of test cases: " + config.testCases.size());
+        outputManager.log("📈 Number of test cases to execute: " + testCasesToExecute.size());
         outputManager.log("⏰ Suite start time: " + new Date(summary.totalStartTime));
 
-        // Group by classification for statistics
         Map<String, List<TestCaseConfig.TestCase>> casesByClassification = new HashMap<>();
-        for (TestCaseConfig.TestCase testCase : config.testCases) {
+        for (TestCaseConfig.TestCase testCase : testCasesToExecute) {
             casesByClassification
                     .computeIfAbsent(testCase.classification, k -> new ArrayList<>())
                     .add(testCase);
@@ -304,10 +333,9 @@ public class TsbsTest {
                     casesByClassification.get(classification).size() + " test cases");
         }
 
-        // Execute all test cases in sequence
-        for (int i = 0; i < config.testCases.size(); i++) {
-            TestCaseConfig.TestCase testCase = config.testCases.get(i);
-            outputManager.log("📋 Execution progress: (" + (i + 1) + "/" + config.testCases.size() + ")");
+        for (int i = 0; i < testCasesToExecute.size(); i++) {
+            TestCaseConfig.TestCase testCase = testCasesToExecute.get(i);
+            outputManager.log("📋 Execution progress: (" + (i + 1) + "/" + testCasesToExecute.size() + ")");
 
             TestResult result = executeTestCase(tableEnv, testCase, outputManager);
             results.add(result);
@@ -316,13 +344,6 @@ public class TsbsTest {
             summary.classificationStats.merge(result.classification, 1, Integer::sum);
             summary.classificationDurations.merge(result.classification, result.duration, Long::sum);
 
-            // Delay between test cases to avoid resource contention
-            try {
-                TimeUnit.SECONDS.sleep(1);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                outputManager.log("⚠️ Thread interrupted: " + e.getMessage());
-            }
         }
 
         summary.totalEndTime = System.currentTimeMillis();
@@ -446,7 +467,7 @@ public class TsbsTest {
             }
 
             if (options.version) {
-                System.out.println("TSBS Flink Test Framework v1.0");
+                System.out.println("TSBS Flink Test v1.0");
                 return;
             }
 
@@ -459,15 +480,29 @@ public class TsbsTest {
             outputManager.log("💾 Output file path: " + effectiveOutputPath);
 
             // Determine data file path
-            String effectiveDataFilePath;
-            if (options.dataFilePath != null && new File(options.dataFilePath).exists()) {
-                effectiveDataFilePath = options.dataFilePath;
-                outputManager.log("✅ Using external data file: " + effectiveDataFilePath);
+            String effectiveDataFilePath1;
+            if (options.dataFilePath1 != null && new File(options.dataFilePath1).exists()) {
+                effectiveDataFilePath1 = options.dataFilePath1;
+                outputManager.log("✅ Using external readings data file: " + effectiveDataFilePath1);
             } else {
-                // Use embedded default data file
-                Path tempDataFile = extractResourceToTempFile("data/default_data.csv", "default_data.csv");
-                effectiveDataFilePath = tempDataFile.toAbsolutePath().toString();
-                outputManager.log("✅ Using embedded default data file (extracted to temp): " + effectiveDataFilePath);
+                // Use embedded default data file for readings
+                Path tempDataFile = extractResourceToTempFile("data/default_readings.csv", "default_readings.csv");
+                effectiveDataFilePath1 = tempDataFile.toAbsolutePath().toString();
+                outputManager.log(
+                        "✅ Using embedded default readings data file (extracted to temp): " + effectiveDataFilePath1);
+            }
+
+            String effectiveDataFilePath2;
+            if (options.dataFilePath2 != null && new File(options.dataFilePath2).exists()) {
+                effectiveDataFilePath2 = options.dataFilePath2;
+                outputManager.log("✅ Using external diagnostics data file: " + effectiveDataFilePath2);
+            } else {
+                // Use embedded default data file for diagnostics
+                Path tempDataFile2 = extractResourceToTempFile("data/default_diagnostics.csv",
+                        "default_diagnostics.csv");
+                effectiveDataFilePath2 = tempDataFile2.toAbsolutePath().toString();
+                outputManager.log("✅ Using embedded default diagnostics data file (extracted to temp): "
+                        + effectiveDataFilePath2);
             }
 
             // Determine config file path
@@ -510,11 +545,36 @@ public class TsbsTest {
                     "    WATERMARK FOR ts AS ts - INTERVAL '5' SECOND\n" +
                     ") WITH (\n" +
                     "    'connector' = 'tsbs',\n" +
-                    "    'path' = 'file://" + effectiveDataFilePath + "'\n" +
+                    "    'data-type' = 'readings',\n" +
+                    "    'path' = 'file://" + effectiveDataFilePath1 + "'\n" +
                     ")";
 
             tableEnv.executeSql(createTableDDL);
             outputManager.log("✅ Test table created successfully");
+
+            // Create diagnostics table
+            String createDiagnosticsTableDDL = "CREATE TABLE diagnostics (\n" +
+                    "    ts TIMESTAMP(3),\n" +
+                    "    fuel_state DOUBLE,\n" +
+                    "    current_load DOUBLE,\n" +
+                    "    status BIGINT,\n" +
+                    "    name VARCHAR(30),\n" +
+                    "    fleet VARCHAR(30),\n" +
+                    "    driver VARCHAR(30),\n" +
+                    "    model VARCHAR(30),\n" +
+                    "    device_version VARCHAR(30),\n" +
+                    "    load_capacity DOUBLE,\n" +
+                    "    fuel_capacity DOUBLE,\n" +
+                    "    nominal_fuel_consumption DOUBLE,\n" +
+                    "    WATERMARK FOR ts AS ts - INTERVAL '60' MINUTE\n" +
+                    ") WITH (\n" +
+                    "    'connector' = 'tsbs',\n" +
+                    "    'data-type' = 'diagnostics',\n" +
+                    "    'path' = 'file://" + effectiveDataFilePath2 + "'\n" +
+                    ")";
+
+            tableEnv.executeSql(createDiagnosticsTableDDL);
+            outputManager.log("✅ Diagnostics table created successfully");
 
             // Load test configuration
             TestCaseConfig config = loadTestConfig(effectiveConfigFilePath, outputManager);
@@ -522,7 +582,7 @@ public class TsbsTest {
             outputManager.log("📊 Total test cases loaded: " + config.testCases.size());
 
             // Execute test suite
-            TestSuiteSummary summary = executeTestSuite(tableEnv, config, outputManager);
+            TestSuiteSummary summary = executeTestSuite(tableEnv, config, outputManager, options.scenarioId);
 
             int exitCode = summary.failedCases > 0 ? 1 : 0;
             outputManager.log("Exit code: " + exitCode);
