@@ -41,6 +41,9 @@ public class TsbsTest {
         @Parameter(names = { "-o", "--output" }, description = "Output results file path")
         public String outputFilePath = "./tsbs-flink-results.txt";
 
+        @Parameter(names = { "-p", "--parallelism" }, description = "Flink parallelism level (default: 1)")
+        public Integer parallelism = 2;
+
         @Parameter(names = { "-h", "--help" }, description = "Show help information", help = true)
         public boolean help = false;
 
@@ -148,6 +151,7 @@ public class TsbsTest {
         public int failedCases;
         public Map<String, Integer> classificationStats = new HashMap<>();
         public Map<String, Long> classificationDurations = new HashMap<>();
+        public Integer parallelism;
 
         public TestSuiteSummary(long startTime) {
             this.totalStartTime = startTime;
@@ -291,8 +295,10 @@ public class TsbsTest {
     public static TestSuiteSummary executeTestSuite(StreamTableEnvironment tableEnv,
             TestCaseConfig config,
             OutputManager outputManager,
-            String specificScenarioId) {
+            String specificScenarioId,
+            Integer parallelism) {
         TestSuiteSummary summary = new TestSuiteSummary(System.currentTimeMillis());
+        summary.parallelism = parallelism;
         List<TestResult> results = new ArrayList<>();
 
         List<TestCaseConfig.TestCase> testCasesToExecute = config.testCases;
@@ -319,6 +325,7 @@ public class TsbsTest {
         outputManager.log("🎯 Starting test suite execution");
         outputManager.log("📈 Number of test cases to execute: " + testCasesToExecute.size());
         outputManager.log("⏰ Suite start time: " + new Date(summary.totalStartTime));
+        outputManager.log("💻 Parallelism level: " + parallelism);
 
         Map<String, List<TestCaseConfig.TestCase>> casesByClassification = new HashMap<>();
         for (TestCaseConfig.TestCase testCase : testCasesToExecute) {
@@ -355,6 +362,7 @@ public class TsbsTest {
         outputManager.log("==========================================");
         outputManager.log("🏁 Test suite execution completed");
         outputManager.log("⏱️  Total duration: " + summary.totalDuration + "ms");
+        outputManager.log("💻 Parallelism: " + parallelism);
         outputManager.log("==========================================\n\n");
 
         // Generate detailed report
@@ -390,7 +398,8 @@ public class TsbsTest {
                         : "0")
                 + "%");
         outputManager.log(" • Total duration: " + summary.totalDuration + "ms (" +
-                String.format("%.2f", summary.totalDuration / 1000.0) + " seconds)\n");
+                String.format("%.2f", summary.totalDuration / 1000.0) + " seconds)");
+        outputManager.log(" • Parallelism level: " + summary.parallelism + "\n");
 
         // Detailed results table
         outputManager.log("📋 Detailed results list:");
@@ -471,6 +480,13 @@ public class TsbsTest {
                 return;
             }
 
+            // Validate parallelism parameter
+            if (options.parallelism != null && options.parallelism <= 0) {
+                System.err.println("❌ Invalid parallelism value: " + options.parallelism + 
+                                 ". Must be a positive integer.");
+                System.exit(1);
+            }
+
             // Get effective output file path (resolve to current working directory)
             String effectiveOutputPath = getEffectiveOutputFilePath(options.outputFilePath);
             outputManager = new OutputManager(effectiveOutputPath);
@@ -478,6 +494,7 @@ public class TsbsTest {
             outputManager.log("🔧 Program configuration information:");
             outputManager.log("📁 Current working directory: " + System.getProperty("user.dir"));
             outputManager.log("💾 Output file path: " + effectiveOutputPath);
+            outputManager.log("💻 Parallelism level: " + options.parallelism);
 
             // Determine data file path
             String effectiveDataFilePath1;
@@ -516,10 +533,10 @@ public class TsbsTest {
                 outputManager.log("✅ Using embedded default config file: " + effectiveConfigFilePath);
             }
 
-            // Initialize Flink environment
+            // Initialize Flink environment with custom parallelism
             StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
             StreamTableEnvironment tableEnv = StreamTableEnvironment.create(env);
-            env.setParallelism(1);
+            env.setParallelism(options.parallelism);
 
             outputManager.log("🔧 Initializing Flink test environment");
             outputManager.log("💻 Parallelism: " + env.getParallelism());
@@ -581,8 +598,8 @@ public class TsbsTest {
             outputManager.log("✅ Test configuration loaded successfully");
             outputManager.log("📊 Total test cases loaded: " + config.testCases.size());
 
-            // Execute test suite
-            TestSuiteSummary summary = executeTestSuite(tableEnv, config, outputManager, options.scenarioId);
+            // Execute test suite with parallelism parameter
+            TestSuiteSummary summary = executeTestSuite(tableEnv, config, outputManager, options.scenarioId, options.parallelism);
 
             int exitCode = summary.failedCases > 0 ? 1 : 0;
             outputManager.log("Exit code: " + exitCode);
