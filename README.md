@@ -134,12 +134,16 @@ jobmanager.memory.process.size: 1024m
 taskmanager.memory.process.size: 2048m
 
 # Task slot configuration
-taskmanager.numberOfTaskSlots: 4
-parallelism.default: 1
+taskmanager.numberOfTaskSlots: 8
+parallelism.default: 4
 
 # Web UI configuration
 rest.address: 0.0.0.0
 rest.bind-address: 0.0.0.0
+
+env.java.opts: "--add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED --add-opens java.base/sun.nio.ch=ALL-UNNAMED --add-opens java.base/java.nio=ALL-UNNAMED --add-opens java.base/sun.misc=ALL-UNNAMED"
+akka.jvm-exit-on-fatal-error: false
+
 ```
 
 # 4. Start Flink Cluster
@@ -301,7 +305,7 @@ The project supports the following command-line parameters:
 | --data2       | -d2   | Diagnostics data file path        | Built-in default data    |
 | --output      | -o    | Test result output path           | ./tsbs-flink-results.txt |
 | --scenario    | -s    | Execute specific test scenario    | All scenarios            |
-| --parallelism | -s    | Flink parallelism level           | 2                        |
+| --parallelism | -s    | Flink parallelism level           | 4                        |
 | --help        | -h    | Show help information             | -                        |
 | --version     | -v    | Show version information          | -                        |
 

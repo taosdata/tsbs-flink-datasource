@@ -42,7 +42,7 @@ public class TsbsTest {
         public String outputFilePath = "./tsbs-flink-results.txt";
 
         @Parameter(names = { "-p", "--parallelism" }, description = "Flink parallelism level (default: 1)")
-        public Integer parallelism = 2;
+        public Integer parallelism = 4;
 
         @Parameter(names = { "-h", "--help" }, description = "Show help information", help = true)
         public boolean help = false;
@@ -460,6 +460,9 @@ public class TsbsTest {
      * Main program entry point
      */
     public static void main(String[] args) {
+        System.setProperty("akka.jvm-exit-on-fatal-error", "false");
+        System.setProperty("akka.coordinated-shutdown.exit-jvm", "off");
+
         CommandLineOptions options = new CommandLineOptions();
         JCommander commander = JCommander.newBuilder()
                 .addObject(options)
@@ -482,8 +485,8 @@ public class TsbsTest {
 
             // Validate parallelism parameter
             if (options.parallelism != null && options.parallelism <= 0) {
-                System.err.println("❌ Invalid parallelism value: " + options.parallelism + 
-                                 ". Must be a positive integer.");
+                System.err.println("❌ Invalid parallelism value: " + options.parallelism +
+                        ". Must be a positive integer.");
                 System.exit(1);
             }
 
@@ -599,7 +602,8 @@ public class TsbsTest {
             outputManager.log("📊 Total test cases loaded: " + config.testCases.size());
 
             // Execute test suite with parallelism parameter
-            TestSuiteSummary summary = executeTestSuite(tableEnv, config, outputManager, options.scenarioId, options.parallelism);
+            TestSuiteSummary summary = executeTestSuite(tableEnv, config, outputManager, options.scenarioId,
+                    options.parallelism);
 
             int exitCode = summary.failedCases > 0 ? 1 : 0;
             outputManager.log("Exit code: " + exitCode);
