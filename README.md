@@ -140,6 +140,9 @@ parallelism.default: 1
 # Web UI configuration
 rest.address: 0.0.0.0
 rest.bind-address: 0.0.0.0
+
+# for JAVA 17
+env.java.opts: "--add-exports java.base/sun.net.util=ALL-UNNAMED"
 ```
 
 # 4. Start Flink Cluster
@@ -196,13 +199,7 @@ CREATE TABLE page_visits_per_minute (
 ) WITH ('connector' = 'print');
 
 -- Execute window aggregation query
-INSERT INTO page_visits_per_minute
-SELECT
-    TUMBLE_START(`timestamp`, INTERVAL '1' MINUTE) AS window_start,
-    TUMBLE_END(`timestamp`, INTERVAL '1' MINUTE) AS window_end,
-    COUNT(*) AS pv
-FROM page_visits
-GROUP BY TUMBLE(`timestamp`, INTERVAL '1' MINUTE);
+SELECT * FROM page_visits;
 ```
 
 # 5. Compile Custom Data Source Project
