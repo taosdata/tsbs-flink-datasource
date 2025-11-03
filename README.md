@@ -196,13 +196,7 @@ CREATE TABLE page_visits_per_minute (
 ) WITH ('connector' = 'print');
 
 -- Execute window aggregation query
-INSERT INTO page_visits_per_minute
-SELECT
-    TUMBLE_START(`timestamp`, INTERVAL '1' MINUTE) AS window_start,
-    TUMBLE_END(`timestamp`, INTERVAL '1' MINUTE) AS window_end,
-    COUNT(*) AS pv
-FROM page_visits
-GROUP BY TUMBLE(`timestamp`, INTERVAL '1' MINUTE);
+SELECT * FROM page_visits;
 ```
 
 # 5. Compile Custom Data Source Project
@@ -215,7 +209,7 @@ git clone git@github.com:taosdata/tsbs-flink-datasource.git
 cd tsbs-flink-datasource
 
 # Compile project
-mvn clean package -f package/pom.xml
+mvn clean package -f package.pom.xml
 
 # Verify build result
 ls -la target/tsbs-flink-datasource-1.0-SNAPSHOT.jar
@@ -225,6 +219,8 @@ $FLINK_HOME/bin/flink run target/tsbs-flink-datasource-1.0-SNAPSHOT.jar --help
 ```
 
 # 6. Debug Custom Data Source via Flink SQL
+
+Open `$FLINK_HOME/bin/sql-client.sh` and execute the following SQL statements:
 
 ## 6.1 Register Custom Connector
 
