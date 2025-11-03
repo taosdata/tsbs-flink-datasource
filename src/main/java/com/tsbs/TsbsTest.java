@@ -74,7 +74,7 @@ public class TsbsTest {
         }
 
         public void log(String message) {
-            String timestampedMessage = "[" + dateFormat.format(curDate) + "] " + message;
+            String timestampedMessage = "[" + dateFormat.format(new Date()) + "] " + message;
             System.out.println(timestampedMessage);
             fileWriter.println(timestampedMessage);
             fileWriter.flush();
@@ -240,7 +240,7 @@ public class TsbsTest {
 
         try {
             TableResult tableResult = tableEnv.executeSql(testCase.sql);
-            tableResult.await();
+            // tableResult.await();
 
             // Collect results and count
             try (CloseableIterator<org.apache.flink.types.Row> iterator = tableResult.collect()) {
@@ -248,13 +248,14 @@ public class TsbsTest {
                 outputManager.log("📊 Query results:");
                 while (iterator.hasNext()) {
                     org.apache.flink.types.Row row = iterator.next();
-                    outputManager.log("   " + row.toString());
-                    count++;
                     // Limit output rows to avoid log bloat
-                    if (count >= 5) {
+                    if (count < 5) {
+                        outputManager.log("   " + row.toString());
+                    } else if (count == 5) {
                         outputManager.log("   ... (more results omitted)");
-                        break;
+                    } else {
                     }
+                    count++;
                 }
                 result.recordsProcessed = count;
             }
@@ -343,13 +344,6 @@ public class TsbsTest {
             summary.classificationStats.merge(result.classification, 1, Integer::sum);
             summary.classificationDurations.merge(result.classification, result.duration, Long::sum);
 
-            // Delay between test cases to avoid resource contention
-            try {
-                TimeUnit.SECONDS.sleep(1);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                outputManager.log("⚠️ Thread interrupted: " + e.getMessage());
-            }
         }
 
         summary.totalEndTime = System.currentTimeMillis();
@@ -551,6 +545,7 @@ public class TsbsTest {
                     "    WATERMARK FOR ts AS ts - INTERVAL '5' SECOND\n" +
                     ") WITH (\n" +
                     "    'connector' = 'tsbs',\n" +
+                    "    'data-type' = 'readings',\n" +
                     "    'path' = 'file://" + effectiveDataFilePath1 + "'\n" +
                     ")";
 
@@ -574,6 +569,7 @@ public class TsbsTest {
                     "    WATERMARK FOR ts AS ts - INTERVAL '60' MINUTE\n" +
                     ") WITH (\n" +
                     "    'connector' = 'tsbs',\n" +
+                    "    'data-type' = 'diagnostics',\n" +
                     "    'path' = 'file://" + effectiveDataFilePath2 + "'\n" +
                     ")";
 
