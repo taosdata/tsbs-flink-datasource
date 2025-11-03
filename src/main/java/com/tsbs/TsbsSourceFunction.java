@@ -8,8 +8,6 @@ import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
 import java.io.StringReader;
-import java.time.LocalDateTime;
-import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 
 public class TsbsSourceFunction extends RichSourceFunction<RowData> {
@@ -45,8 +43,6 @@ public class TsbsSourceFunction extends RichSourceFunction<RowData> {
                 .map(fileStatus -> fileStatus.getPath())
                 .toArray(org.apache.flink.core.fs.Path[]::new);
 
-        final DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS");
-
         for (org.apache.flink.core.fs.Path filePath : paths) {
             if (!isRunning)
                 break;
@@ -67,9 +63,11 @@ public class TsbsSourceFunction extends RichSourceFunction<RowData> {
                             controlEmissionRate();
 
                             // Parse and emit data
-                            RowData rowData = parseRecordToRowData(record, formatter);
-                            ctx.collect(rowData);
-                            recordsEmittedThisSecond++;
+                            RowData rowData = parseRecordToRowData(record);
+                            if (rowData != null) {
+                                ctx.collect(rowData);
+                                recordsEmittedThisSecond++;
+                            }
                         }
                     } catch (Exception e) {
                         System.err.println("Failed to parse line: " + line);
@@ -134,28 +132,28 @@ public class TsbsSourceFunction extends RichSourceFunction<RowData> {
         }
     }
 
-    private RowData parseRecordToRowData(CSVRecord record, DateTimeFormatter formatter) {
+    private RowData parseRecordToRowData(CSVRecord record) {
         if ("readings".equalsIgnoreCase(dataType)) {
-            return parseReadingsRecord(record, formatter);
+            return parseReadingsRecord(record);
         } else if ("diagnostics".equalsIgnoreCase(dataType)) {
-            return parseDiagnosticsRecord(record, formatter);
+            return parseDiagnosticsRecord(record);
         } else {
             System.err.println("Unknown data type: " + dataType);
             return null;
         }
     }
 
-    private RowData parseReadingsRecord(CSVRecord record, DateTimeFormatter formatter) {
+    private RowData parseReadingsRecord(CSVRecord record) {
         // Create GenericRowData with 16 fields
         final org.apache.flink.table.data.GenericRowData rowData = new org.apache.flink.table.data.GenericRowData(16);
 
         try {
-            // Parse timestamp (index 0)
-            final String timestampStr = safeGet(record, 0).trim().replace("\"", "");
-            final TimestampData timestampData = parseTimestamp(timestampStr, formatter);
+            // Parse timestamp (index 0) as milliseconds (numeric value, no quotes)
+            final String timestampStr = safeGet(record, 0).trim();
+            final TimestampData timestampData = parseTimestampFromMillis(timestampStr);
             rowData.setField(0, timestampData);
 
-            // Parse numeric fields (indices 1-7, 13-15)
+            // Parse numeric fields
             rowData.setField(1, parseDouble(safeGet(record, 1))); // latitude
             rowData.setField(2, parseDouble(safeGet(record, 2))); // longitude
             rowData.setField(3, parseDouble(safeGet(record, 3))); // elevation
@@ -163,19 +161,21 @@ public class TsbsSourceFunction extends RichSourceFunction<RowData> {
             rowData.setField(5, parseDouble(safeGet(record, 5))); // heading
             rowData.setField(6, parseDouble(safeGet(record, 6))); // grade
             rowData.setField(7, parseDouble(safeGet(record, 7))); // fuel_consumption
-            rowData.setField(13, parseDouble(safeGet(record, 13))); // load_capacity
-            rowData.setField(14, parseDouble(safeGet(record, 14))); // fuel_capacity
-            rowData.setField(15, parseDouble(safeGet(record, 15))); // nominal_fuel_consumption
 
-            // Create GenericRowData with 16 fields
+            // Parse string fields
             rowData.setField(8, parseString(safeGet(record, 8))); // name
             rowData.setField(9, parseString(safeGet(record, 9))); // fleet
             rowData.setField(10, parseString(safeGet(record, 10))); // driver
             rowData.setField(11, parseString(safeGet(record, 11))); // model
             rowData.setField(12, parseString(safeGet(record, 12))); // device_version
 
+            // Parse remaining numeric fields
+            rowData.setField(13, parseDouble(safeGet(record, 13))); // load_capacity
+            rowData.setField(14, parseDouble(safeGet(record, 14))); // fuel_capacity
+            rowData.setField(15, parseDouble(safeGet(record, 15))); // nominal_fuel_consumption
+
         } catch (Exception e) {
-            System.err.println("Failed to parse record: " + record.toString());
+            System.err.println("Failed to parse readings record: " + record.toString());
             e.printStackTrace();
             return null;
         }
@@ -183,26 +183,32 @@ public class TsbsSourceFunction extends RichSourceFunction<RowData> {
         return rowData;
     }
 
-    private RowData parseDiagnosticsRecord(CSVRecord record, DateTimeFormatter formatter) {
+    private RowData parseDiagnosticsRecord(CSVRecord record) {
+        // Create GenericRowData with 12 fields
         final org.apache.flink.table.data.GenericRowData rowData = new org.apache.flink.table.data.GenericRowData(12);
 
         try {
-            final String timestampStr = safeGet(record, 0).trim().replace("\"", "");
-            final TimestampData timestampData = parseTimestamp(timestampStr, formatter);
+            // Parse timestamp (index 0) as milliseconds (numeric value, no quotes)
+            final String timestampStr = safeGet(record, 0).trim();
+            final TimestampData timestampData = parseTimestampFromMillis(timestampStr);
             rowData.setField(0, timestampData);
 
+            // Parse numeric fields
             rowData.setField(1, parseDouble(safeGet(record, 1))); // fuel_state
             rowData.setField(2, parseDouble(safeGet(record, 2))); // current_load
             rowData.setField(3, parseLong(safeGet(record, 3))); // status
-            rowData.setField(9, parseDouble(safeGet(record, 9))); // load_capacity
-            rowData.setField(10, parseDouble(safeGet(record, 10))); // fuel_capacity
-            rowData.setField(11, parseDouble(safeGet(record, 11))); // nominal_fuel_consumption
 
+            // Parse string fields
             rowData.setField(4, parseString(safeGet(record, 4))); // name
             rowData.setField(5, parseString(safeGet(record, 5))); // fleet
             rowData.setField(6, parseString(safeGet(record, 6))); // driver
             rowData.setField(7, parseString(safeGet(record, 7))); // model
             rowData.setField(8, parseString(safeGet(record, 8))); // device_version
+
+            // Parse remaining numeric fields
+            rowData.setField(9, parseDouble(safeGet(record, 9))); // load_capacity
+            rowData.setField(10, parseDouble(safeGet(record, 10))); // fuel_capacity
+            rowData.setField(11, parseDouble(safeGet(record, 11))); // nominal_fuel_consumption
 
         } catch (Exception e) {
             System.err.println("Failed to parse diagnostics record: " + record.toString());
@@ -250,19 +256,24 @@ public class TsbsSourceFunction extends RichSourceFunction<RowData> {
         if (value == null || value.trim().isEmpty()) {
             return null;
         }
-        return StringData.fromString(value.trim().replace("\"", ""));
+        // Preserve the original string format
+        return StringData.fromString(value.trim());
     }
 
-    private TimestampData parseTimestamp(String timestampStr, DateTimeFormatter formatter) {
+    /**
+     * Parse timestamp from milliseconds (numeric value)
+     */
+    private TimestampData parseTimestampFromMillis(String timestampStr) {
         if (timestampStr == null || timestampStr.trim().isEmpty()) {
             return null;
         }
         try {
-            LocalDateTime localDateTime = LocalDateTime.parse(timestampStr, formatter);
-            return TimestampData.fromLocalDateTime(localDateTime);
+            // Parse as milliseconds (numeric value, no quotes)
+            long millis = Long.parseLong(timestampStr.trim());
+            return TimestampData.fromEpochMillis(millis);
         } catch (Exception e) {
-            System.err.println("Failed to parse timestamp: '" + timestampStr + "'");
-            return TimestampData.fromLocalDateTime(LocalDateTime.now());
+            System.err.println("Failed to parse timestamp from milliseconds: '" + timestampStr + "'");
+            return TimestampData.fromEpochMillis(System.currentTimeMillis());
         }
     }
 
