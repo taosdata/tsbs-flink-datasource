@@ -134,12 +134,16 @@ jobmanager.memory.process.size: 1024m
 taskmanager.memory.process.size: 2048m
 
 # Task slot configuration
-taskmanager.numberOfTaskSlots: 4
-parallelism.default: 1
+taskmanager.numberOfTaskSlots: 8
+parallelism.default: 4
 
 # Web UI configuration
 rest.address: 0.0.0.0
 rest.bind-address: 0.0.0.0
+
+env.java.opts: "--add-opens java.base/java.lang=ALL-UNNAMED --add-opens java.base/java.util=ALL-UNNAMED --add-opens java.base/sun.nio.ch=ALL-UNNAMED --add-opens java.base/java.nio=ALL-UNNAMED --add-opens java.base/sun.misc=ALL-UNNAMED"
+akka.jvm-exit-on-fatal-error: false
+
 ```
 
 # 4. Start Flink Cluster
@@ -294,34 +298,36 @@ SELECT * FROM readings;
 
 The project supports the following command-line parameters:
 
-| Parameter  | Short | Description                       | Default Value            |
-| ---------- | ----- | --------------------------------- |------------------------- |
-| --config   | -c    | Test case configuration file path | Built-in default config  |
-| --data1    | -d1   | Readings data file path           | Built-in default data    |
-| --data2    | -d2   | Diagnostics data file path        | Built-in default data    |
-| --output   | -o    | Test result output path           | ./tsbs-flink-results.txt |
-| --scenario | -s    | Execute specific test scenario    | All scenarios            |
-| --help     | -h    | Show help information             | -                        |
-| --version  | -v    | Show version information          | -                        |
+| Parameter     | Short | Description                       | Default Value            |
+| ------------- | ----- | --------------------------------- |------------------------- |
+| --config      | -c    | Test case configuration file path | Built-in default config  |
+| --data1       | -d1   | Readings data file path           | Built-in default data    |
+| --data2       | -d2   | Diagnostics data file path        | Built-in default data    |
+| --output      | -o    | Test result output path           | ./tsbs-flink-results.txt |
+| --scenario    | -s    | Execute specific test scenario    | All scenarios            |
+| --parallelism | -s    | Flink parallelism level           | 4                        |
+| --help        | -h    | Show help information             | -                        |
+| --version     | -v    | Show version information          | -                        |
 
 ## 7.2 Execute Test Examples
 
 ```bash
 # View help information
-$FLINK_HOME/bin/flink run target/tsbs-flink-datasource-1.0-SNAPSHOT.jar --help
+$FLINK_HOME/bin/flink run --execution-mode local target/tsbs-flink-datasource-1.0-SNAPSHOT.jar --help
 
 # Execute all test scenarios
-$FLINK_HOME/bin/flink run target/tsbs-flink-datasource-1.0-SNAPSHOT.jar
+$FLINK_HOME/bin/flink run --execution-mode local target/tsbs-flink-datasource-1.0-SNAPSHOT.jar
 
-# Execute specific test scenario
-$FLINK_HOME/bin/flink run target/tsbs-flink-datasource-1.0-SNAPSHOT.jar --scenario A1
+# Execute specific test scenario with custom parallelism
+$FLINK_HOME/bin/flink run --execution-mode local target/tsbs-flink-datasource-1.0-SNAPSHOT.jar --scenario A1 --parallelism 2
 
 # Use custom configuration and data files
-$FLINK_HOME/bin/flink run target/tsbs-flink-datasource-1.0-SNAPSHOT.jar \
+$FLINK_HOME/bin/flink run --execution-mode local target/tsbs-flink-datasource-1.0-SNAPSHOT.jar \
     --config /path/to/custom_config.yaml \
     --data1 /path/to/readings.csv \
     --data2 /path/to/diagnostics.csv \
-    --output ./custom-results.txt
+    --output ./custom-results.txt \
+    --parallelism 8
     
 ```
 

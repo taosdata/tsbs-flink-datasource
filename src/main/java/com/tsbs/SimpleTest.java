@@ -77,7 +77,7 @@ public class SimpleTest {
                 String sql = "SELECT * FROM diagnostics";
 
                 sql = sql.replace("\n", " ").replace("\r", " ").replaceAll("\\s+", " ");
-                System.out.println(sql);
+                LogPrinter.log(sql);
 
                 TableResult projectQuery = tableEnv.executeSql(sql);
                 projectQuery.print();

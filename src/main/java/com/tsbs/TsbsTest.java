@@ -20,6 +20,9 @@ import java.util.*;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
+/**
+ * TSBS Flink Performance Test Suite
+ */
 public class TsbsTest {
 
     /**
@@ -41,55 +44,14 @@ public class TsbsTest {
         @Parameter(names = { "-o", "--output" }, description = "Output results file path")
         public String outputFilePath = "./tsbs-flink-results.txt";
 
+        @Parameter(names = { "-p", "--parallelism" }, description = "Flink parallelism level (default: 4)")
+        public Integer parallelism = 4;
+
         @Parameter(names = { "-h", "--help" }, description = "Show help information", help = true)
         public boolean help = false;
 
         @Parameter(names = { "-v", "--version" }, description = "Show version information")
         public boolean version = false;
-    }
-
-    /**
-     * Output Manager - Handles both console and file output
-     */
-    private static class OutputManager {
-        private Date curDate;
-        private SimpleDateFormat dateFormat;
-        private String outputFilePath;
-        private PrintWriter fileWriter;
-
-        public OutputManager(String baseFilePath) throws IOException {
-            this.curDate = new Date();
-            this.dateFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
-            this.outputFilePath = baseFilePath;
-
-            File outputFile = new File(outputFilePath);
-            if (outputFile.exists()) {
-                try (FileWriter fw = new FileWriter(outputFile, false)) {
-                    fw.write(""); // Clear file content
-                }
-            }
-
-            this.fileWriter = new PrintWriter(new FileWriter(outputFilePath, true));
-            log("📁 Output file created: " + outputFilePath);
-        }
-
-        public void log(String message) {
-            String timestampedMessage = "[" + dateFormat.format(new Date()) + "] " + message;
-            System.out.println(timestampedMessage);
-            fileWriter.println(timestampedMessage);
-            fileWriter.flush();
-        }
-
-        public String getOutputFilePath() {
-            return outputFilePath;
-        }
-
-        public void close() {
-            if (fileWriter != null) {
-                fileWriter.close();
-                log("✅ Output file closed: " + outputFilePath);
-            }
-        }
     }
 
     /**
@@ -148,6 +110,7 @@ public class TsbsTest {
         public int failedCases;
         public Map<String, Integer> classificationStats = new HashMap<>();
         public Map<String, Long> classificationDurations = new HashMap<>();
+        public Integer parallelism;
 
         public TestSuiteSummary(long startTime) {
             this.totalStartTime = startTime;
@@ -157,7 +120,7 @@ public class TsbsTest {
     /**
      * Load YAML configuration file
      */
-    public static TestCaseConfig loadTestConfig(String configPath, OutputManager outputManager) throws Exception {
+    public static TestCaseConfig loadTestConfig(String configPath) throws Exception {
         ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
 
         File configFile = new File(configPath);
@@ -165,14 +128,14 @@ public class TsbsTest {
 
         if (configFile.exists()) {
             inputStream = new FileInputStream(configFile);
-            outputManager.log("✅ External test configuration file loaded: " + configFile.getAbsolutePath());
+            LogPrinter.log("External test configuration file loaded: " + configFile.getAbsolutePath());
         } else {
             inputStream = TsbsTest.class.getClassLoader().getResourceAsStream(configPath);
             if (inputStream == null) {
                 throw new IllegalArgumentException("Configuration file not found: " + configPath +
                         "\nCurrent working directory: " + System.getProperty("user.dir"));
             }
-            outputManager.log("✅ Embedded test configuration file loaded: " + configPath);
+            LogPrinter.log("Embedded test configuration file loaded: " + configPath);
         }
 
         try (InputStream is = inputStream) {
@@ -225,47 +188,58 @@ public class TsbsTest {
      * Execute a single test case
      */
     public static TestResult executeTestCase(StreamTableEnvironment tableEnv,
-            TestCaseConfig.TestCase testCase,
-            OutputManager outputManager) {
+            TestCaseConfig.TestCase testCase) {
+
+        // Manually clear queues (ensure clean state for each test)
+        LogPrinter.debug("Initializing shared queues...");
+
+        TsbsSourceFunction.clearQueue("readings");
+        TsbsSourceFunction.clearQueue("diagnostics");
+        LogPrinter.debug("Queues cleared");
+
+        TsbsSourceFunction.restartReading("readings");
+        TsbsSourceFunction.restartReading("diagnostics");
+        LogPrinter.debug("File reading restarted");
+
         TestResult result = new TestResult(testCase.scenarioId, testCase.classification, testCase.description);
         result.startTime = System.currentTimeMillis();
 
         testCase.sql = testCase.sql.replace("\n", " ").replaceAll("\\s+", " ");
-        outputManager.log("🚀 - Starting test case: " + testCase.scenarioId);
-        outputManager.log("📂 - Classification: " + testCase.classification);
+        LogPrinter.log("   - Starting test case: " + testCase.scenarioId);
+        LogPrinter.log("   - Classification: " + testCase.classification);
         if (!testCase.description.isEmpty()) {
-            outputManager.log("📋 - Description: " + testCase.description);
+            LogPrinter.log("   - Description: " + testCase.description);
         }
-        outputManager.log("🔍 - SQL: " + testCase.sql);
+        LogPrinter.log("   - SQL: " + testCase.sql);
 
         try {
+
             TableResult tableResult = tableEnv.executeSql(testCase.sql);
+
             // tableResult.await();
 
             // Collect results and count
             try (CloseableIterator<org.apache.flink.types.Row> iterator = tableResult.collect()) {
                 int count = 0;
-                outputManager.log("📊 Query results:");
+                LogPrinter.log("Query results:");
                 while (iterator.hasNext()) {
                     org.apache.flink.types.Row row = iterator.next();
                     // Limit output rows to avoid log bloat
                     if (count < 5) {
-                        outputManager.log("   " + row.toString());
+                        LogPrinter.log("   " + row.toString());
                     } else if (count == 5) {
-                        outputManager.log("   ... (more results omitted)");
-                    } else {
+                        LogPrinter.log("   ... (more results omitted)");
                     }
                     count++;
                 }
                 result.recordsProcessed = count;
             }
-            // tableResult.print();
 
             result.endTime = System.currentTimeMillis();
             result.duration = result.endTime - result.startTime;
             result.success = true;
 
-            outputManager.log("✅ - Test passed - Records processed: " + result.recordsProcessed +
+            LogPrinter.log("   - Test passed - Records processed: " + result.recordsProcessed +
                     " | Duration: " + result.duration + "ms");
 
         } catch (Exception e) {
@@ -274,14 +248,22 @@ public class TsbsTest {
             result.success = false;
             result.errorMessage = e.getMessage();
 
-            outputManager.log("❌ - Test failed - Duration: " + result.duration + "ms");
-            outputManager.log("💥 - Error message: " + e.getMessage());
-            // Do not print full stack trace to file to avoid log bloat
-            System.err.println("Detailed error stack:");
+            LogPrinter.log("   - Test failed - Duration: " + result.duration + "ms");
+            LogPrinter.log("   - Error message: " + e.getMessage());
+            LogPrinter.debug("Detailed error stack: " + e.getMessage());
             e.printStackTrace();
         }
 
-        outputManager.log("---");
+        LogPrinter.log("   - Waiting  10000 ms for resource release...");
+        try {
+            Thread.sleep(10000);
+            LogPrinter.log("   - Resource release wait completed");
+        } catch (InterruptedException e) {
+            LogPrinter.log("   - Resource release wait interrupted");
+            Thread.currentThread().interrupt();
+        }
+
+        LogPrinter.log("---");
         return result;
     }
 
@@ -290,9 +272,10 @@ public class TsbsTest {
      */
     public static TestSuiteSummary executeTestSuite(StreamTableEnvironment tableEnv,
             TestCaseConfig config,
-            OutputManager outputManager,
-            String specificScenarioId) {
+            String specificScenarioId,
+            Integer parallelism) {
         TestSuiteSummary summary = new TestSuiteSummary(System.currentTimeMillis());
+        summary.parallelism = parallelism;
         List<TestResult> results = new ArrayList<>();
 
         List<TestCaseConfig.TestCase> testCasesToExecute = config.testCases;
@@ -303,22 +286,23 @@ public class TsbsTest {
                     .collect(Collectors.toList());
 
             if (testCasesToExecute.isEmpty()) {
-                outputManager.log("❌ No test case found with scenario ID: " + specificScenarioId);
-                outputManager.log("Available scenario IDs: " +
+                LogPrinter.log("No test case found with scenario ID: " + specificScenarioId);
+                LogPrinter.log("Available scenario IDs: " +
                         config.testCases.stream().map(tc -> tc.scenarioId).collect(Collectors.toList()));
                 summary.totalEndTime = System.currentTimeMillis();
                 summary.totalDuration = summary.totalEndTime - summary.totalStartTime;
                 return summary;
             }
 
-            outputManager.log("🎯 Executing specific scenario: " + specificScenarioId);
-            outputManager.log("📊 Filtered test cases: " + testCasesToExecute.size() + " (from total " +
+            LogPrinter.log("Executing specific scenario: " + specificScenarioId);
+            LogPrinter.log("Filtered test cases: " + testCasesToExecute.size() + " (from total " +
                     config.testCases.size() + ")");
         }
 
-        outputManager.log("🎯 Starting test suite execution");
-        outputManager.log("📈 Number of test cases to execute: " + testCasesToExecute.size());
-        outputManager.log("⏰ Suite start time: " + new Date(summary.totalStartTime));
+        LogPrinter.log("Starting test suite execution");
+        LogPrinter.log("Number of test cases to execute: " + testCasesToExecute.size());
+        LogPrinter.log("Suite start time: " + new Date(summary.totalStartTime));
+        LogPrinter.log("Parallelism level: " + parallelism);
 
         Map<String, List<TestCaseConfig.TestCase>> casesByClassification = new HashMap<>();
         for (TestCaseConfig.TestCase testCase : testCasesToExecute) {
@@ -327,23 +311,22 @@ public class TsbsTest {
                     .add(testCase);
         }
 
-        outputManager.log("📂 Number of classifications: " + casesByClassification.size());
+        LogPrinter.log("Number of classifications: " + casesByClassification.size());
         for (String classification : casesByClassification.keySet()) {
-            outputManager.log("   - " + classification + ": " +
+            LogPrinter.log("   - " + classification + ": " +
                     casesByClassification.get(classification).size() + " test cases");
         }
 
         for (int i = 0; i < testCasesToExecute.size(); i++) {
             TestCaseConfig.TestCase testCase = testCasesToExecute.get(i);
-            outputManager.log("📋 Execution progress: (" + (i + 1) + "/" + testCasesToExecute.size() + ")");
+            LogPrinter.log("Execution progress: (" + (i + 1) + "/" + testCasesToExecute.size() + ")");
 
-            TestResult result = executeTestCase(tableEnv, testCase, outputManager);
+            TestResult result = executeTestCase(tableEnv, testCase);
             results.add(result);
 
             // Update classification statistics
             summary.classificationStats.merge(result.classification, 1, Integer::sum);
             summary.classificationDurations.merge(result.classification, result.duration, Long::sum);
-
         }
 
         summary.totalEndTime = System.currentTimeMillis();
@@ -352,13 +335,14 @@ public class TsbsTest {
         summary.passedCases = (int) results.stream().filter(r -> r.success).count();
         summary.failedCases = summary.totalCases - summary.passedCases;
 
-        outputManager.log("==========================================");
-        outputManager.log("🏁 Test suite execution completed");
-        outputManager.log("⏱️  Total duration: " + summary.totalDuration + "ms");
-        outputManager.log("==========================================\n\n");
+        LogPrinter.log("==========================================");
+        LogPrinter.log("Test suite execution completed");
+        LogPrinter.log("Total duration: " + summary.totalDuration + "ms");
+        LogPrinter.log("Parallelism: " + parallelism);
+        LogPrinter.log("==========================================\n\n");
 
         // Generate detailed report
-        generateTestReport(results, summary, outputManager);
+        generateTestReport(results, summary);
 
         return summary;
     }
@@ -366,10 +350,9 @@ public class TsbsTest {
     /**
      * Generate detailed test report
      */
-    public static void generateTestReport(List<TestResult> results, TestSuiteSummary summary,
-            OutputManager outputManager) {
-        outputManager.log("📊 Detailed test results summary report");
-        outputManager.log("==========================================");
+    public static void generateTestReport(List<TestResult> results, TestSuiteSummary summary) {
+        LogPrinter.log("Detailed test results summary report");
+        LogPrinter.log("==========================================");
         SimpleDateFormat timeFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
 
         // Group results by classification
@@ -381,28 +364,29 @@ public class TsbsTest {
         }
 
         // Overall statistics
-        outputManager.log("📈 Overall statistics:");
-        outputManager.log(" • Total test cases: " + summary.totalCases);
-        outputManager.log(" • Passed cases: " + summary.passedCases);
-        outputManager.log(" • Failed cases: " + summary.failedCases);
-        outputManager.log(" • Success rate: " +
+        LogPrinter.log("Overall statistics:");
+        LogPrinter.log(" * Total test cases: " + summary.totalCases);
+        LogPrinter.log(" * Passed cases: " + summary.passedCases);
+        LogPrinter.log(" * Failed cases: " + summary.failedCases);
+        LogPrinter.log(" * Success rate: " +
                 (summary.totalCases > 0 ? String.format("%.1f", (summary.passedCases * 100.0 / summary.totalCases))
                         : "0")
                 + "%");
-        outputManager.log(" • Total duration: " + summary.totalDuration + "ms (" +
-                String.format("%.2f", summary.totalDuration / 1000.0) + " seconds)\n");
+        LogPrinter.log(" * Total duration: " + summary.totalDuration + "ms (" +
+                String.format("%.2f", summary.totalDuration / 1000.0) + " seconds)");
+        LogPrinter.log(" * Parallelism level: " + summary.parallelism + "\n");
 
         // Detailed results table
-        outputManager.log("📋 Detailed results list:");
-        outputManager.log(
+        LogPrinter.log("Detailed results list:");
+        LogPrinter.log(
                 "| Scenario ID | Classification | Records | Start Time              | End Time                | Duration(ms) | Status    |");
-        outputManager.log(
+        LogPrinter.log(
                 "|-------------|----------------|---------|-------------------------|-------------------------|--------------|-----------|");
 
         for (TestResult result : results) {
-            String status = result.success ? "✅ Passed" : "❌ Failed";
+            String status = result.success ? "Passed" : "Failed";
 
-            outputManager.log(String.format("| %-11s | %-14s | %7d | %-19s | %-18s | %12d | %s |",
+            LogPrinter.log(String.format("| %-11s | %-14s | %7d | %-19s | %-18s | %12d | %s |",
                     result.scenarioId,
                     result.classification,
                     result.recordsProcessed,
@@ -413,7 +397,7 @@ public class TsbsTest {
         }
 
         // Performance analysis
-        outputManager.log("📈 Performance analysis:");
+        LogPrinter.log("Performance analysis:");
         if (!results.isEmpty()) {
             TestResult fastest = results.stream()
                     .min(Comparator.comparingLong(r -> r.duration))
@@ -422,11 +406,11 @@ public class TsbsTest {
                     .max(Comparator.comparingLong(r -> r.duration))
                     .orElse(results.get(0));
 
-            outputManager.log(" • Most time-consuming case: " + slowest.scenarioId + " (" + slowest.classification +
+            LogPrinter.log(" * Most time-consuming case: " + slowest.scenarioId + " (" + slowest.classification +
                     ") - " + slowest.duration + "ms");
-            outputManager.log(" • Fastest case: " + fastest.scenarioId + " (" + fastest.classification +
+            LogPrinter.log(" * Fastest case: " + fastest.scenarioId + " (" + fastest.classification +
                     ") - " + fastest.duration + "ms");
-            outputManager.log(" • Average case duration: " +
+            LogPrinter.log(" * Average case duration: " +
                     String.format("%.2f", results.stream().mapToLong(r -> r.duration).average().orElse(0)) + "ms");
         }
 
@@ -436,27 +420,30 @@ public class TsbsTest {
                 .collect(ArrayList::new, ArrayList::add, ArrayList::addAll);
 
         if (!failedResults.isEmpty()) {
-            outputManager.log("⚠️ Failed cases details:");
+            LogPrinter.log("Failed cases details:");
             for (TestResult failed : failedResults) {
-                outputManager.log("• " + failed.scenarioId + " (" + failed.classification + "): " +
+                LogPrinter.log("• " + failed.scenarioId + " (" + failed.classification + "): " +
                         failed.errorMessage);
             }
         }
 
-        outputManager.log("==========================================");
-        outputManager.log("📁 Full report saved to: " + outputManager.getOutputFilePath() + "\n");
+        LogPrinter.log("==========================================");
+        if (LogPrinter.isOutputToFile()) {
+            LogPrinter.log("Full report saved to: " + LogPrinter.getOutputFilePath() + "\n");
+        }
     }
 
     /**
      * Main program entry point
      */
     public static void main(String[] args) {
+        System.setProperty("akka.jvm-exit-on-fatal-error", "false");
+        System.setProperty("akka.coordinated-shutdown.exit-jvm", "off");
+
         CommandLineOptions options = new CommandLineOptions();
         JCommander commander = JCommander.newBuilder()
                 .addObject(options)
                 .build();
-
-        OutputManager outputManager = null;
 
         try {
             commander.parse(args);
@@ -471,58 +458,64 @@ public class TsbsTest {
                 return;
             }
 
-            // Get effective output file path (resolve to current working directory)
-            String effectiveOutputPath = getEffectiveOutputFilePath(options.outputFilePath);
-            outputManager = new OutputManager(effectiveOutputPath);
+            // Validate parallelism parameter
+            if (options.parallelism != null && options.parallelism <= 0) {
+                System.err.println("Invalid parallelism value: " + options.parallelism +
+                        ". Must be a positive integer.");
+                System.exit(1);
+            }
 
-            outputManager.log("🔧 Program configuration information:");
-            outputManager.log("📁 Current working directory: " + System.getProperty("user.dir"));
-            outputManager.log("💾 Output file path: " + effectiveOutputPath);
+            // Initialize file output if specified
+            if (options.outputFilePath != null && !options.outputFilePath.trim().isEmpty()) {
+                String effectiveOutputPath = getEffectiveOutputFilePath(options.outputFilePath);
+                LogPrinter.openFile(effectiveOutputPath);
+            }
 
-            // Determine data file path
+            LogPrinter.log("Current working directory: " + System.getProperty("user.dir"));
+            LogPrinter.log("Output file path: " +
+                    (LogPrinter.isOutputToFile() ? LogPrinter.getOutputFilePath()
+                            : "Not specified (console only)"));
+            LogPrinter.log("Parallelism level: " + options.parallelism);
+
+            // Determine data file paths
             String effectiveDataFilePath1;
             if (options.dataFilePath1 != null && new File(options.dataFilePath1).exists()) {
                 effectiveDataFilePath1 = options.dataFilePath1;
-                outputManager.log("✅ Using external readings data file: " + effectiveDataFilePath1);
+                LogPrinter.log("Using external readings data file: " + effectiveDataFilePath1);
             } else {
-                // Use embedded default data file for readings
                 Path tempDataFile = extractResourceToTempFile("data/default_readings.csv", "default_readings.csv");
                 effectiveDataFilePath1 = tempDataFile.toAbsolutePath().toString();
-                outputManager.log(
-                        "✅ Using embedded default readings data file (extracted to temp): " + effectiveDataFilePath1);
+                LogPrinter.log("Using embedded default readings data file: " + effectiveDataFilePath1);
             }
 
             String effectiveDataFilePath2;
             if (options.dataFilePath2 != null && new File(options.dataFilePath2).exists()) {
                 effectiveDataFilePath2 = options.dataFilePath2;
-                outputManager.log("✅ Using external diagnostics data file: " + effectiveDataFilePath2);
+                LogPrinter.log("Using external diagnostics data file: " + effectiveDataFilePath2);
             } else {
-                // Use embedded default data file for diagnostics
                 Path tempDataFile2 = extractResourceToTempFile("data/default_diagnostics.csv",
                         "default_diagnostics.csv");
                 effectiveDataFilePath2 = tempDataFile2.toAbsolutePath().toString();
-                outputManager.log("✅ Using embedded default diagnostics data file (extracted to temp): "
-                        + effectiveDataFilePath2);
+                LogPrinter.log("Using embedded default diagnostics data file: " + effectiveDataFilePath2);
             }
 
             // Determine config file path
             String effectiveConfigFilePath;
             if (options.configFilePath != null && new File(options.configFilePath).exists()) {
                 effectiveConfigFilePath = options.configFilePath;
-                outputManager.log("✅ Using external config file: " + effectiveConfigFilePath);
+                LogPrinter.log("Using external config file: " + effectiveConfigFilePath);
             } else {
-                // Use embedded default config file
                 effectiveConfigFilePath = "config/default_cases.yaml";
-                outputManager.log("✅ Using embedded default config file: " + effectiveConfigFilePath);
+                LogPrinter.log("Using embedded default config file: " + effectiveConfigFilePath);
             }
 
-            // Initialize Flink environment
+            // Initialize Flink environment with custom parallelism
             StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
             StreamTableEnvironment tableEnv = StreamTableEnvironment.create(env);
-            env.setParallelism(1);
+            env.setParallelism(options.parallelism);
 
-            outputManager.log("🔧 Initializing Flink test environment");
-            outputManager.log("💻 Parallelism: " + env.getParallelism());
+            LogPrinter.log("Initializing Flink test environment");
+            LogPrinter.log("Parallelism: " + env.getParallelism());
 
             // Create test table
             String createTableDDL = "CREATE TABLE readings (\n" +
@@ -550,7 +543,7 @@ public class TsbsTest {
                     ")";
 
             tableEnv.executeSql(createTableDDL);
-            outputManager.log("✅ Test table created successfully");
+            LogPrinter.log("Readings table created successfully");
 
             // Create diagnostics table
             String createDiagnosticsTableDDL = "CREATE TABLE diagnostics (\n" +
@@ -574,19 +567,20 @@ public class TsbsTest {
                     ")";
 
             tableEnv.executeSql(createDiagnosticsTableDDL);
-            outputManager.log("✅ Diagnostics table created successfully");
+            LogPrinter.log("Diagnostics table created successfully");
 
             // Load test configuration
-            TestCaseConfig config = loadTestConfig(effectiveConfigFilePath, outputManager);
-            outputManager.log("✅ Test configuration loaded successfully");
-            outputManager.log("📊 Total test cases loaded: " + config.testCases.size());
+            TestCaseConfig config = loadTestConfig(effectiveConfigFilePath);
+            LogPrinter.log("Test configuration loaded successfully");
+            LogPrinter.log("Total test cases loaded: " + config.testCases.size());
 
-            // Execute test suite
-            TestSuiteSummary summary = executeTestSuite(tableEnv, config, outputManager, options.scenarioId);
+            // Execute test suite with parallelism parameter
+            TestSuiteSummary summary = executeTestSuite(tableEnv, config, options.scenarioId,
+                    options.parallelism);
 
             int exitCode = summary.failedCases > 0 ? 1 : 0;
-            outputManager.log("Exit code: " + exitCode);
-            outputManager.log("==========================================");
+            LogPrinter.log("Exit code: " + exitCode);
+            LogPrinter.log("==========================================");
 
             System.exit(exitCode);
 
@@ -595,17 +589,14 @@ public class TsbsTest {
             commander.usage();
             System.exit(1);
         } catch (Exception e) {
-            if (outputManager != null) {
-                outputManager.log("💥 Program execution exception: " + e.getMessage());
-            } else {
-                System.err.println("💥 Program initialization exception: " + e.getMessage());
-            }
+            LogPrinter.error("Program execution exception: " + e.getMessage());
             e.printStackTrace();
             System.exit(1);
         } finally {
-            if (outputManager != null) {
-                outputManager.close();
-            }
+            // Cleanup shared queues
+            TsbsSourceFunction.shutdownAll();
+            // Close file output
+            LogPrinter.closeFile();
         }
     }
 }
