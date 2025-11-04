@@ -12,6 +12,7 @@ import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.dataformat.yaml.YA
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
 import java.io.*;
+import java.lang.module.Configuration;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -41,7 +42,7 @@ public class TsbsTest {
         @Parameter(names = { "-o", "--output" }, description = "Output results file path")
         public String outputFilePath = "./tsbs-flink-results.txt";
 
-        @Parameter(names = { "-p", "--parallelism" }, description = "Flink parallelism level (default: 1)")
+        @Parameter(names = { "-l", "--parallelism" }, description = "Flink parallelism level (default: 1)")
         public Integer parallelism = 4;
 
         @Parameter(names = { "-h", "--help" }, description = "Show help information", help = true)
@@ -243,7 +244,26 @@ public class TsbsTest {
         outputManager.log("🔍 - SQL: " + testCase.sql);
 
         try {
+            org.apache.flink.configuration.Configuration configuration = tableEnv.getConfig().getConfiguration();
+            configuration.setString("table.exec.resource.default-parallelism", "2");
+
+            outputManager.log("💻 设置的TableConfig并行度: " +
+                    tableEnv.getConfig().getConfiguration().getString("table.exec.resource.default-parallelism",
+                            "未设置"));
+
+            String explanation = tableEnv.explainSql(testCase.sql);
+            outputManager.log("🔍 SQL执行计划分析:");
+            outputManager.log(explanation);
+
+            // 检查执行计划中是否包含预期的并行度
+            if (explanation.contains("parallelism=1") && !explanation.contains("parallelism=8")) {
+                outputManager.log("⚠️  警告：执行计划显示并行度仍为1，设置可能未生效");
+            } else if (explanation.contains("parallelism=8")) {
+                outputManager.log("✅ 执行计划确认并行度已设置为8");
+            }
+
             TableResult tableResult = tableEnv.executeSql(testCase.sql);
+
             // tableResult.await();
 
             // Collect results and count
