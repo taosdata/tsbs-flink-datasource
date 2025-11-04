@@ -1,154 +1,377 @@
 package com.tsbs;
 
-import org.apache.flink.streaming.api.functions.source.RichSourceFunction;
+import org.apache.flink.streaming.api.functions.source.RichParallelSourceFunction;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.data.StringData;
 import org.apache.flink.table.data.TimestampData;
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVParser;
 import org.apache.commons.csv.CSVRecord;
-import java.io.StringReader;
-import java.util.Arrays;
 
-public class TsbsSourceFunction extends RichSourceFunction<RowData> {
+import java.io.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicLong;
+import java.util.Map;
+import java.util.HashMap;
 
-    private final String directoryPath;
-    private final Integer recordsPerSecond;
+/**
+ * TSBS Data Source Function with Shared Queue Architecture
+ * Single producer reads file, multiple consumers process data in parallel
+ */
+public class TsbsSourceFunction extends RichParallelSourceFunction<RowData> {
+    private static final Map<String, SharedQueueManager> queueManagers = new HashMap<>();
+    private static final Object INIT_LOCK = new Object();
+
+    private final String filePath;
     private final String dataType;
     private volatile boolean isRunning = true;
 
-    private transient long intervalStartTimeNs;
-    private transient int recordsEmittedThisSecond;
-    private final long targetIntervalNs = 1_000_000_000L; // Nanoseconds in 1 second
+    private transient int subtaskIndex;
+    private transient int numSubtasks;
+    private transient SharedQueueManager queueManager;
 
-    public TsbsSourceFunction(String directoryPath, Integer recordsPerSecond, String dataType) {
-        this.directoryPath = directoryPath;
-        this.recordsPerSecond = recordsPerSecond;
+    public TsbsSourceFunction(String filePath, String dataType) {
+        this.filePath = filePath;
         this.dataType = dataType;
     }
 
     @Override
     public void open(org.apache.flink.configuration.Configuration parameters) throws Exception {
-        // Initialize rate control variables
-        this.intervalStartTimeNs = System.nanoTime();
-        this.recordsEmittedThisSecond = 0;
+        this.subtaskIndex = getRuntimeContext().getIndexOfThisSubtask();
+        this.numSubtasks = getRuntimeContext().getNumberOfParallelSubtasks();
+
+        // Initialize shared queue manager
+        initializeQueueManager();
+
+        LogPrinter.debug("Consumer initialized - Data type: " + dataType +
+                " - Subtask: " + subtaskIndex + "/" + numSubtasks);
+    }
+
+    /**
+     * Initialize shared queue manager
+     */
+    private void initializeQueueManager() {
+        synchronized (INIT_LOCK) {
+            if (!queueManagers.containsKey(dataType)) {
+                queueManagers.put(dataType, new SharedQueueManager(filePath, dataType));
+                LogPrinter.debug("Created shared queue manager: " + dataType);
+            }
+            this.queueManager = queueManagers.get(dataType);
+
+            // Auto-start file reader thread if not running
+            if (!queueManager.isReaderRunning()) {
+                queueManager.startFileReader();
+                LogPrinter.debug("Auto-started file reader thread: " + dataType);
+            }
+        }
     }
 
     @Override
     public void run(SourceContext<RowData> ctx) throws Exception {
-        final org.apache.flink.core.fs.FileSystem fs = org.apache.flink.core.fs.FileSystem
-                .get(new org.apache.flink.core.fs.Path(directoryPath).toUri());
-        final org.apache.flink.core.fs.Path[] paths = Arrays
-                .stream(fs.listStatus(new org.apache.flink.core.fs.Path(directoryPath)))
-                .map(fileStatus -> fileStatus.getPath())
-                .toArray(org.apache.flink.core.fs.Path[]::new);
+        LogPrinter.debug("Consumer started processing - Data type: " + dataType +
+                " - Subtask: " + subtaskIndex);
 
-        for (org.apache.flink.core.fs.Path filePath : paths) {
-            if (!isRunning)
+        while (isRunning && queueManager.shouldContinueProcessing()) {
+            try {
+                // Get data from queue (with timeout)
+                RowData data = queueManager.poll(100, TimeUnit.MILLISECONDS);
+
+                if (data != null) {
+                    // Emit data
+                    synchronized (ctx.getCheckpointLock()) {
+                        ctx.collect(data);
+                    }
+
+                    // Progress reporting
+                    if (queueManager.getConsumedCount() % 1000 == 0) {
+                        LogPrinter.debug(dataType + " - Consumer " + subtaskIndex +
+                                " processed: " + queueManager.getConsumedCount() + " records");
+                    }
+                } else {
+                    // Brief sleep when queue is empty
+                    Thread.sleep(10);
+                }
+
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
                 break;
-            try (final java.io.InputStream in = fs.open(filePath);
-                    final java.util.Scanner scanner = new java.util.Scanner(in, "UTF-8")) {
-                while (scanner.hasNextLine() && isRunning) {
-                    final String line = scanner.nextLine().trim();
-                    if (line.isEmpty())
-                        continue;
+            }
+        }
 
-                    try (StringReader reader = new StringReader(line);
-                            CSVParser parser = new CSVParser(reader, CSVFormat.DEFAULT)) {
-                        for (CSVRecord record : parser) {
-                            if (!isRunning)
-                                break;
+        LogPrinter.debug("Consumer completed - Data type: " + dataType +
+                " - Subtask: " + subtaskIndex);
+    }
 
-                            // Precise rate control
-                            controlEmissionRate();
+    @Override
+    public void cancel() {
+        isRunning = false;
+        LogPrinter.debug("Consumer cancelled - Data type: " + dataType +
+                " - Subtask: " + subtaskIndex);
+    }
 
-                            // Parse and emit data
-                            RowData rowData = parseRecordToRowData(record);
-                            if (rowData != null) {
-                                ctx.collect(rowData);
-                                recordsEmittedThisSecond++;
-                            }
-                        }
-                    } catch (Exception e) {
-                        System.err.println("Failed to parse line: " + line);
-                        e.printStackTrace();
+    /**
+     * Manually clear queue (static method, can be called externally)
+     */
+    public static void clearQueue(String dataType) {
+        synchronized (INIT_LOCK) {
+            if (queueManagers.containsKey(dataType)) {
+                queueManagers.get(dataType).clearQueue();
+                LogPrinter.debug("Manually cleared queue: " + dataType);
+            }
+        }
+    }
+
+    /**
+     * Restart file reading (static method, can be called externally)
+     */
+    public static void restartReading(String dataType) {
+        synchronized (INIT_LOCK) {
+            if (queueManagers.containsKey(dataType)) {
+                queueManagers.get(dataType).restart();
+                LogPrinter.debug("Restarted file reading: " + dataType);
+            }
+        }
+    }
+
+    /**
+     * Shutdown all queue managers (static method)
+     */
+    public static void shutdownAll() {
+        synchronized (INIT_LOCK) {
+            for (SharedQueueManager manager : queueManagers.values()) {
+                manager.shutdown();
+            }
+            queueManagers.clear();
+            LogPrinter.debug("All queue managers shut down");
+        }
+    }
+}
+
+/**
+ * Shared Queue Manager
+ */
+class SharedQueueManager {
+    private final String filePath;
+    private final String dataType;
+    private final BlockingQueue<RowData> dataQueue;
+    private volatile Thread fileReaderThread;
+    private final AtomicBoolean isReaderRunning = new AtomicBoolean(false);
+    private final AtomicLong producedCount = new AtomicLong(0);
+    private final AtomicLong consumedCount = new AtomicLong(0);
+    private final AtomicBoolean shouldRestart = new AtomicBoolean(false);
+
+    // Queue configuration
+    private static final int QUEUE_CAPACITY = 1000000;
+    private static final int BATCH_SIZE = 1000;
+
+    public SharedQueueManager(String filePath, String dataType) {
+        this.filePath = filePath;
+        this.dataType = dataType;
+        this.dataQueue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
+    }
+
+    /**
+     * Start file reader thread
+     */
+    public void startFileReader() {
+        if (isReaderRunning.get()) {
+            LogPrinter.debug("File reader thread already running: " + dataType);
+            return;
+        }
+
+        isReaderRunning.set(true);
+        shouldRestart.set(false);
+
+        fileReaderThread = new Thread(() -> {
+            LogPrinter.debug("File reader thread started: " + dataType + " - File: " + filePath);
+
+            try {
+                do {
+                    producedCount.set(0);
+                    readFile();
+
+                    // Check if restart is needed
+                    if (shouldRestart.get()) {
+                        LogPrinter.debug("Restart request detected, re-reading file: " + dataType);
+                        shouldRestart.set(false);
+                        clearQueue(); // Clear queue and start over
+                    } else {
+                        break; // Normal completion, exit loop
+                    }
+                } while (isReaderRunning.get());
+
+                LogPrinter.debug("File reading completed: " + dataType +
+                        " - Total records: " + producedCount.get());
+
+            } catch (Exception e) {
+                LogPrinter.error("File reading exception: " + dataType + " - " + e.getMessage());
+                e.printStackTrace();
+            } finally {
+                isReaderRunning.set(false);
+                LogPrinter.debug("File reader thread ended: " + dataType);
+            }
+        }, "FileReader-" + dataType);
+
+        fileReaderThread.setDaemon(true);
+        fileReaderThread.start();
+    }
+
+    /**
+     * Read single file
+     */
+    private void readFile() throws Exception {
+        File file = new File(filePath.replace("file://", ""));
+
+        if (!file.exists() || !file.isFile()) {
+            LogPrinter.error("File does not exist or is not a file: " + filePath);
+            return;
+        }
+
+        LogPrinter.debug("Reading file: " + file.getName() + " - Data type: " + dataType);
+
+        try (FileReader fileReader = new FileReader(file);
+                BufferedReader bufferedReader = new BufferedReader(fileReader)) {
+
+            String line;
+            long lineNumber = 0;
+            long recordsAdded = 0;
+
+            while ((line = bufferedReader.readLine()) != null && isReaderRunning.get()) {
+                lineNumber++;
+
+                // Skip empty lines and header row
+                if (line.trim().isEmpty() || lineNumber == 1)
+                    continue;
+
+                // Parse CSV line
+                RowData rowData = parseCsvLineToRowData(line);
+                if (rowData != null) {
+                    // Non-blocking queue insertion
+                    if (dataQueue.offer(rowData, 100, TimeUnit.MILLISECONDS)) {
+                        recordsAdded++;
+                        producedCount.incrementAndGet();
+                    } else {
+                        // Wait if queue is full
+                        Thread.sleep(10);
                     }
                 }
+
+                // Batch progress reporting
+                if (recordsAdded % BATCH_SIZE == 0) {
+                    LogPrinter.debug(dataType + " - File " + file.getName() +
+                            " progress: " + recordsAdded + " records");
+                }
             }
+
+            LogPrinter.debug(dataType + " - File " + file.getName() +
+                    " completed: " + recordsAdded + " records");
+
+        } catch (Exception e) {
+            LogPrinter.error("Failed to read file: " + file.getName() + " - " + e.getMessage());
+            throw e;
         }
     }
 
     /**
-     * Precise control of data emission rate
+     * Get data from queue
      */
-    private void controlEmissionRate() throws InterruptedException {
-        if (recordsPerSecond == null || recordsPerSecond <= 0) {
-            return; // No rate limiting
+    public RowData poll(long timeout, TimeUnit unit) throws InterruptedException {
+        RowData data = dataQueue.poll(timeout, unit);
+        if (data != null) {
+            consumedCount.incrementAndGet();
         }
+        return data;
+    }
 
-        long currentTimeNs = System.nanoTime();
-        long elapsedTimeNs = currentTimeNs - intervalStartTimeNs;
+    /**
+     * Clear queue
+     */
+    public void clearQueue() {
+        dataQueue.clear();
+        consumedCount.set(0);
+        LogPrinter.debug("Queue cleared: " + dataType);
+    }
 
-        // If we've emitted the target number of records but haven't reached 1 second
-        // yet, need to wait
-        if (recordsEmittedThisSecond >= recordsPerSecond) {
-            long timeToWaitNs = targetIntervalNs - elapsedTimeNs;
-            if (timeToWaitNs > 0) {
-                preciseSleep(timeToWaitNs);
-            }
-            // Reset counters
-            recordsEmittedThisSecond = 0;
-            intervalStartTimeNs = System.nanoTime();
-            return;
-        }
-
-        // Calculate when the next record should be emitted
-        long expectedTimeForNextRecord = (long) ((recordsEmittedThisSecond + 1)
-                * (targetIntervalNs / (double) recordsPerSecond));
-        if (elapsedTimeNs < expectedTimeForNextRecord) {
-            long sleepTimeNs = expectedTimeForNextRecord - elapsedTimeNs;
-            preciseSleep(sleepTimeNs);
+    /**
+     * Restart file reading
+     */
+    public void restart() {
+        shouldRestart.set(true);
+        if (!isReaderRunning.get()) {
+            startFileReader();
         }
     }
 
     /**
-     * High-precision sleep implementation
+     * Shutdown queue manager
      */
-    private void preciseSleep(long sleepTimeNs) throws InterruptedException {
-        if (sleepTimeNs <= 0)
-            return;
-
-        long sleepMs = sleepTimeNs / 1_000_000;
-        int sleepNs = (int) (sleepTimeNs % 1_000_000);
-
-        if (sleepMs > 0) {
-            Thread.sleep(sleepMs, sleepNs);
-        } else if (sleepNs > 0) {
-            // For sub-millisecond sleep, use busy-wait for higher precision
-            long startTime = System.nanoTime();
-            while ((System.nanoTime() - startTime) < sleepTimeNs) {
-                // Busy-wait - suitable for short sleep durations
-            }
+    public void shutdown() {
+        isReaderRunning.set(false);
+        if (fileReaderThread != null && fileReaderThread.isAlive()) {
+            fileReaderThread.interrupt();
         }
+        clearQueue();
+        LogPrinter.debug("Queue manager shut down: " + dataType);
     }
 
-    private RowData parseRecordToRowData(CSVRecord record) {
+    /**
+     * Check if processing should continue
+     */
+    public boolean shouldContinueProcessing() {
+        return isReaderRunning.get() || !dataQueue.isEmpty();
+    }
+
+    /**
+     * Check if reader thread is running
+     */
+    public boolean isReaderRunning() {
+        return isReaderRunning.get();
+    }
+
+    /**
+     * Get consumed count
+     */
+    public long getConsumedCount() {
+        return consumedCount.get();
+    }
+
+    /**
+     * Parse CSV line to RowData
+     */
+    private RowData parseCsvLineToRowData(String line) {
+        try (StringReader reader = new StringReader(line);
+                CSVParser parser = new CSVParser(reader, CSVFormat.DEFAULT)) {
+
+            for (CSVRecord record : parser) {
+                return parseRecordToRowData(record, dataType);
+            }
+        } catch (Exception e) {
+            LogPrinter.error("Failed to parse CSV line: " + line);
+            e.printStackTrace();
+        }
+        return null;
+    }
+
+    /**
+     * Parse record to RowData
+     */
+    private RowData parseRecordToRowData(CSVRecord record, String dataType) {
         if ("readings".equalsIgnoreCase(dataType)) {
             return parseReadingsRecord(record);
         } else if ("diagnostics".equalsIgnoreCase(dataType)) {
             return parseDiagnosticsRecord(record);
         } else {
-            System.err.println("Unknown data type: " + dataType);
+            LogPrinter.error("Unknown data type: " + dataType);
             return null;
         }
     }
 
     private RowData parseReadingsRecord(CSVRecord record) {
-        // Create GenericRowData with 16 fields
         final org.apache.flink.table.data.GenericRowData rowData = new org.apache.flink.table.data.GenericRowData(16);
 
         try {
-            // Parse timestamp (index 0) as milliseconds (numeric value, no quotes)
+            // Parse timestamp (index 0) as milliseconds
             final String timestampStr = safeGet(record, 0).trim();
             final TimestampData timestampData = parseTimestampFromMillis(timestampStr);
             rowData.setField(0, timestampData);
@@ -175,7 +398,7 @@ public class TsbsSourceFunction extends RichSourceFunction<RowData> {
             rowData.setField(15, parseDouble(safeGet(record, 15))); // nominal_fuel_consumption
 
         } catch (Exception e) {
-            System.err.println("Failed to parse readings record: " + record.toString());
+            LogPrinter.error("Failed to parse readings record: " + record.toString());
             e.printStackTrace();
             return null;
         }
@@ -184,11 +407,10 @@ public class TsbsSourceFunction extends RichSourceFunction<RowData> {
     }
 
     private RowData parseDiagnosticsRecord(CSVRecord record) {
-        // Create GenericRowData with 12 fields
         final org.apache.flink.table.data.GenericRowData rowData = new org.apache.flink.table.data.GenericRowData(12);
 
         try {
-            // Parse timestamp (index 0) as milliseconds (numeric value, no quotes)
+            // Parse timestamp (index 0) as milliseconds
             final String timestampStr = safeGet(record, 0).trim();
             final TimestampData timestampData = parseTimestampFromMillis(timestampStr);
             rowData.setField(0, timestampData);
@@ -211,7 +433,7 @@ public class TsbsSourceFunction extends RichSourceFunction<RowData> {
             rowData.setField(11, parseDouble(safeGet(record, 11))); // nominal_fuel_consumption
 
         } catch (Exception e) {
-            System.err.println("Failed to parse diagnostics record: " + record.toString());
+            LogPrinter.error("Failed to parse diagnostics record: " + record.toString());
             e.printStackTrace();
             return null;
         }
@@ -235,7 +457,7 @@ public class TsbsSourceFunction extends RichSourceFunction<RowData> {
         try {
             return Long.parseLong(value.trim());
         } catch (NumberFormatException e) {
-            System.err.println("Failed to parse long from: '" + value + "'");
+            LogPrinter.error("Failed to parse long from: '" + value + "'");
             return 0L;
         }
     }
@@ -247,7 +469,7 @@ public class TsbsSourceFunction extends RichSourceFunction<RowData> {
         try {
             return Double.parseDouble(value.trim());
         } catch (NumberFormatException e) {
-            System.err.println("Failed to parse double from: '" + value + "'");
+            LogPrinter.error("Failed to parse double from: '" + value + "'");
             return 0.0;
         }
     }
@@ -256,29 +478,19 @@ public class TsbsSourceFunction extends RichSourceFunction<RowData> {
         if (value == null || value.trim().isEmpty()) {
             return null;
         }
-        // Preserve the original string format
         return StringData.fromString(value.trim());
     }
 
-    /**
-     * Parse timestamp from milliseconds (numeric value)
-     */
     private TimestampData parseTimestampFromMillis(String timestampStr) {
         if (timestampStr == null || timestampStr.trim().isEmpty()) {
             return null;
         }
         try {
-            // Parse as milliseconds (numeric value, no quotes)
             long millis = Long.parseLong(timestampStr.trim());
             return TimestampData.fromEpochMillis(millis);
         } catch (Exception e) {
-            System.err.println("Failed to parse timestamp from milliseconds: '" + timestampStr + "'");
+            LogPrinter.error("Failed to parse timestamp from milliseconds: '" + timestampStr + "'");
             return TimestampData.fromEpochMillis(System.currentTimeMillis());
         }
-    }
-
-    @Override
-    public void cancel() {
-        isRunning = false;
     }
 }

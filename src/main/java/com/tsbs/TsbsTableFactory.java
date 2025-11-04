@@ -9,6 +9,9 @@ import org.apache.flink.table.factories.FactoryUtil;
 import java.util.HashSet;
 import java.util.Set;
 
+/**
+ * Table factory for TSBS connector
+ */
 public class TsbsTableFactory implements DynamicTableSourceFactory {
     public static final String IDENTIFIER = "tsbs";
 
@@ -16,13 +19,7 @@ public class TsbsTableFactory implements DynamicTableSourceFactory {
             .key("path")
             .stringType()
             .noDefaultValue()
-            .withDescription("Path to the directory containing tsbs data files.");
-
-    public static final ConfigOption<Integer> RECORDS_PER_SECOND = ConfigOptions
-            .key("records-per-second")
-            .intType()
-            .defaultValue(-1)
-            .withDescription("Maximum number of records to read per second. Default is unlimited.");
+            .withDescription("Path to the TSBS data file.");
 
     public static final ConfigOption<String> DATA_TYPE = ConfigOptions
             .key("data-type")
@@ -45,7 +42,6 @@ public class TsbsTableFactory implements DynamicTableSourceFactory {
     @Override
     public Set<ConfigOption<?>> optionalOptions() {
         final Set<ConfigOption<?>> options = new HashSet<>();
-        options.add(RECORDS_PER_SECOND);
         options.add(DATA_TYPE);
         return options;
     }
@@ -55,11 +51,10 @@ public class TsbsTableFactory implements DynamicTableSourceFactory {
         final FactoryUtil.TableFactoryHelper helper = FactoryUtil.createTableFactoryHelper(this, context);
         helper.validate();
         final String path = helper.getOptions().get(PATH);
-        final Integer recordsPerSecond = helper.getOptions().get(RECORDS_PER_SECOND);
-        final String dataType = helper.getOptions().get(DATA_TYPE); // 获取数据类型
+        final String dataType = helper.getOptions().get(DATA_TYPE);
         final org.apache.flink.table.types.DataType producedDataType = context.getCatalogTable().getSchema()
                 .toPhysicalRowDataType();
 
-        return new TsbsTableSource(path, producedDataType, recordsPerSecond, dataType);
+        return new TsbsTableSource(path, producedDataType, dataType);
     }
 }
