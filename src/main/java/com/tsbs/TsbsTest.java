@@ -45,7 +45,7 @@ public class TsbsTest {
         public String outputFilePath = "./tsbs-flink-results.txt";
 
         @Parameter(names = { "-p", "--parallelism" }, description = "Flink parallelism level (default: 4)")
-        public Integer parallelism = 1;
+        public Integer parallelism = 4;
 
         @Parameter(names = { "-h", "--help" }, description = "Show help information", help = true)
         public boolean help = false;
