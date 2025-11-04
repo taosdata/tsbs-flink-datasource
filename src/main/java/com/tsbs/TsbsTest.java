@@ -250,9 +250,17 @@ public class TsbsTest {
 
             LogPrinter.log("   - Test failed - Duration: " + result.duration + "ms");
             LogPrinter.log("   - Error message: " + e.getMessage());
-            // Do not print full stack trace to file to avoid log bloat
             LogPrinter.debug("Detailed error stack: " + e.getMessage());
             e.printStackTrace();
+        }
+
+        LogPrinter.log("   - Waiting  10000 ms for resource release...");
+        try {
+            Thread.sleep(10000);
+            LogPrinter.log("   - Resource release wait completed");
+        } catch (InterruptedException e) {
+            LogPrinter.log("   - Resource release wait interrupted");
+            Thread.currentThread().interrupt();
         }
 
         LogPrinter.log("---");
