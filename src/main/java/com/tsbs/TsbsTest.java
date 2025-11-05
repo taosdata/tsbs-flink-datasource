@@ -47,6 +47,10 @@ public class TsbsTest {
         @Parameter(names = { "-p", "--parallelism" }, description = "Flink parallelism level (default: 4)")
         public Integer parallelism = 4;
 
+        @Parameter(names = { "-q",
+                "--shared-queue" }, description = "Use shared queue mode instead of direct reading (default: false)")
+        public Boolean useSharedQueue = false;
+
         @Parameter(names = { "-h", "--help" }, description = "Show help information", help = true)
         public boolean help = false;
 
@@ -111,6 +115,7 @@ public class TsbsTest {
         public Map<String, Integer> classificationStats = new HashMap<>();
         public Map<String, Long> classificationDurations = new HashMap<>();
         public Integer parallelism;
+        public Boolean useSharedQueue;
 
         public TestSuiteSummary(long startTime) {
             this.totalStartTime = startTime;
@@ -188,18 +193,22 @@ public class TsbsTest {
      * Execute a single test case
      */
     public static TestResult executeTestCase(StreamTableEnvironment tableEnv,
-            TestCaseConfig.TestCase testCase) {
+            TestCaseConfig.TestCase testCase, Boolean useSharedQueue) {
 
-        // Manually clear queues (ensure clean state for each test)
-        LogPrinter.debug("Initializing shared queues...");
+        LogPrinter.debug("Initializing data source with mode: " +
+                (useSharedQueue ? "Shared Queue" : "Direct Reading"));
 
-        TsbsSourceFunction.clearQueue("readings");
-        TsbsSourceFunction.clearQueue("diagnostics");
-        LogPrinter.debug("Queues cleared");
+        if (useSharedQueue) {
+            TsbsSourceFunction.clearQueue("readings");
+            TsbsSourceFunction.clearQueue("diagnostics");
+            LogPrinter.debug("Queues cleared for shared queue mode");
 
-        TsbsSourceFunction.restartReading("readings");
-        TsbsSourceFunction.restartReading("diagnostics");
-        LogPrinter.debug("File reading restarted");
+            TsbsSourceFunction.restartReading("readings");
+            TsbsSourceFunction.restartReading("diagnostics");
+            LogPrinter.debug("File reading restarted for shared queue mode");
+        } else {
+            LogPrinter.debug("Direct reading mode - no queue initialization needed");
+        }
 
         TestResult result = new TestResult(testCase.scenarioId, testCase.classification, testCase.description);
         result.startTime = System.currentTimeMillis();
@@ -207,6 +216,7 @@ public class TsbsTest {
         testCase.sql = testCase.sql.replace("\n", " ").replaceAll("\\s+", " ");
         LogPrinter.log("   - Starting test case: " + testCase.scenarioId);
         LogPrinter.log("   - Classification: " + testCase.classification);
+        LogPrinter.log("   - Reading mode: " + (useSharedQueue ? "Shared Queue" : "Direct Reading"));
         if (!testCase.description.isEmpty()) {
             LogPrinter.log("   - Description: " + testCase.description);
         }
@@ -240,7 +250,8 @@ public class TsbsTest {
             result.success = true;
 
             LogPrinter.log("   - Test passed - Records processed: " + result.recordsProcessed +
-                    " | Duration: " + result.duration + "ms");
+                    " | Duration: " + result.duration + "ms | Mode: " +
+                    (useSharedQueue ? "Shared Queue" : "Direct Reading"));
 
         } catch (Exception e) {
             result.endTime = System.currentTimeMillis();
@@ -248,13 +259,14 @@ public class TsbsTest {
             result.success = false;
             result.errorMessage = e.getMessage();
 
-            LogPrinter.log("   - Test failed - Duration: " + result.duration + "ms");
+            LogPrinter.log("   - Test failed - Duration: " + result.duration + "ms | Mode: " +
+                    (useSharedQueue ? "Shared Queue" : "Direct Reading"));
             LogPrinter.log("   - Error message: " + e.getMessage());
             LogPrinter.debug("Detailed error stack: " + e.getMessage());
             e.printStackTrace();
         }
 
-        LogPrinter.log("   - Waiting  10000 ms for resource release...");
+        LogPrinter.log("   - Waiting 10000 ms for resource release...");
         try {
             Thread.sleep(10000);
             LogPrinter.log("   - Resource release wait completed");
@@ -273,9 +285,12 @@ public class TsbsTest {
     public static TestSuiteSummary executeTestSuite(StreamTableEnvironment tableEnv,
             TestCaseConfig config,
             String specificScenarioId,
-            Integer parallelism) {
+            Integer parallelism,
+            Boolean useSharedQueue) {
+
         TestSuiteSummary summary = new TestSuiteSummary(System.currentTimeMillis());
         summary.parallelism = parallelism;
+        summary.useSharedQueue = useSharedQueue;
         List<TestResult> results = new ArrayList<>();
 
         List<TestCaseConfig.TestCase> testCasesToExecute = config.testCases;
@@ -303,6 +318,7 @@ public class TsbsTest {
         LogPrinter.log("Number of test cases to execute: " + testCasesToExecute.size());
         LogPrinter.log("Suite start time: " + new Date(summary.totalStartTime));
         LogPrinter.log("Parallelism level: " + parallelism);
+        LogPrinter.log("Reading mode: " + (useSharedQueue ? "Shared Queue" : "Direct Reading"));
 
         Map<String, List<TestCaseConfig.TestCase>> casesByClassification = new HashMap<>();
         for (TestCaseConfig.TestCase testCase : testCasesToExecute) {
@@ -321,7 +337,7 @@ public class TsbsTest {
             TestCaseConfig.TestCase testCase = testCasesToExecute.get(i);
             LogPrinter.log("Execution progress: (" + (i + 1) + "/" + testCasesToExecute.size() + ")");
 
-            TestResult result = executeTestCase(tableEnv, testCase);
+            TestResult result = executeTestCase(tableEnv, testCase, useSharedQueue);
             results.add(result);
 
             // Update classification statistics
@@ -339,6 +355,7 @@ public class TsbsTest {
         LogPrinter.log("Test suite execution completed");
         LogPrinter.log("Total duration: " + summary.totalDuration + "ms");
         LogPrinter.log("Parallelism: " + parallelism);
+        LogPrinter.log("Reading mode: " + (useSharedQueue ? "Shared Queue" : "Direct Reading"));
         LogPrinter.log("==========================================\n\n");
 
         // Generate detailed report
@@ -374,7 +391,8 @@ public class TsbsTest {
                 + "%");
         LogPrinter.log(" * Total duration: " + summary.totalDuration + "ms (" +
                 String.format("%.2f", summary.totalDuration / 1000.0) + " seconds)");
-        LogPrinter.log(" * Parallelism level: " + summary.parallelism + "\n");
+        LogPrinter.log(" * Parallelism level: " + summary.parallelism);
+        LogPrinter.log(" * Reading mode: " + (summary.useSharedQueue ? "Shared Queue" : "Direct Reading") + "\n");
 
         // Detailed results table
         LogPrinter.log("Detailed results list:");
@@ -476,6 +494,7 @@ public class TsbsTest {
                     (LogPrinter.isOutputToFile() ? LogPrinter.getOutputFilePath()
                             : "Not specified (console only)"));
             LogPrinter.log("Parallelism level: " + options.parallelism);
+            LogPrinter.log("Reading mode: " + (options.useSharedQueue ? "Shared Queue" : "Direct Reading"));
 
             // Determine data file paths
             String effectiveDataFilePath1;
@@ -539,7 +558,8 @@ public class TsbsTest {
                     ") WITH (\n" +
                     "    'connector' = 'tsbs',\n" +
                     "    'data-type' = 'readings',\n" +
-                    "    'path' = 'file://" + effectiveDataFilePath1 + "'\n" +
+                    "    'path' = 'file://" + effectiveDataFilePath1 + "',\n" +
+                    "    'direct-reading' = '" + !options.useSharedQueue + "'\n" +
                     ")";
 
             tableEnv.executeSql(createTableDDL);
@@ -563,7 +583,8 @@ public class TsbsTest {
                     ") WITH (\n" +
                     "    'connector' = 'tsbs',\n" +
                     "    'data-type' = 'diagnostics',\n" +
-                    "    'path' = 'file://" + effectiveDataFilePath2 + "'\n" +
+                    "    'path' = 'file://" + effectiveDataFilePath2 + "',\n" +
+                    "    'direct-reading' = '" + !options.useSharedQueue + "'\n" +
                     ")";
 
             tableEnv.executeSql(createDiagnosticsTableDDL);
@@ -574,9 +595,9 @@ public class TsbsTest {
             LogPrinter.log("Test configuration loaded successfully");
             LogPrinter.log("Total test cases loaded: " + config.testCases.size());
 
-            // Execute test suite with parallelism parameter
+            // Execute test suite with all parameters
             TestSuiteSummary summary = executeTestSuite(tableEnv, config, options.scenarioId,
-                    options.parallelism);
+                    options.parallelism, options.useSharedQueue);
 
             int exitCode = summary.failedCases > 0 ? 1 : 0;
             LogPrinter.log("Exit code: " + exitCode);
@@ -594,7 +615,9 @@ public class TsbsTest {
             System.exit(1);
         } finally {
             // Cleanup shared queues
-            TsbsSourceFunction.shutdownAll();
+            if (options.useSharedQueue) {
+                TsbsSourceFunction.shutdownAll();
+            }
             // Close file output
             LogPrinter.closeFile();
         }

@@ -76,7 +76,7 @@ public class SimpleTest {
 
                 // String sql = "SELECT * FROM readings LIMIT 10";
                 // String sql = "SELECT AVG(fuel_consumption) FROM readings";
-                String sql = "SELECT * FROM diagnostics";
+                String sql = "SELECT ts, name FROM diagnostics";
 
                 sql = sql.replace("\n", " ").replace("\r", " ").replaceAll("\\s+", " ");
                 LogPrinter.log(sql);
