@@ -10,6 +10,8 @@ import org.apache.flink.util.CloseableIterator;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.SerializationFeature;
 
 import java.io.*;
 import java.nio.file.Files;
@@ -41,11 +43,20 @@ public class TsbsTest {
         @Parameter(names = { "-s", "--scenario" }, description = "Execute specific scenario ID only")
         public String scenarioId = null;
 
-        @Parameter(names = { "-o", "--output" }, description = "Output results file path")
-        public String outputFilePath = "./tsbs-flink-results.txt";
+        @Parameter(names = { "-l",
+                "--log-output" }, description = "Output log file path (default: ./tsbs-flink-log.txt)")
+        public String logFilePath = "tsbs-flink-log.txt";
+
+        @Parameter(names = { "-j",
+                "--json-output" }, description = "Output results file path (default: ./tsbs-flink-result.json)")
+        public String jsonFilePath = "tsbs-flink-result.json";
 
         @Parameter(names = { "-p", "--parallelism" }, description = "Flink parallelism level (default: 4)")
         public Integer parallelism = 4;
+
+        @Parameter(names = { "-q",
+                "--shared-queue" }, description = "Use shared queue mode instead of direct reading (default: false)")
+        public Boolean useSharedQueue = false;
 
         @Parameter(names = { "-h", "--help" }, description = "Show help information", help = true)
         public boolean help = false;
@@ -111,6 +122,7 @@ public class TsbsTest {
         public Map<String, Integer> classificationStats = new HashMap<>();
         public Map<String, Long> classificationDurations = new HashMap<>();
         public Integer parallelism;
+        public Boolean useSharedQueue;
 
         public TestSuiteSummary(long startTime) {
             this.totalStartTime = startTime;
@@ -188,18 +200,22 @@ public class TsbsTest {
      * Execute a single test case
      */
     public static TestResult executeTestCase(StreamTableEnvironment tableEnv,
-            TestCaseConfig.TestCase testCase) {
+            TestCaseConfig.TestCase testCase, Boolean useSharedQueue) {
 
-        // Manually clear queues (ensure clean state for each test)
-        LogPrinter.debug("Initializing shared queues...");
+        LogPrinter.debug("Initializing data source with mode: " +
+                (useSharedQueue ? "Shared Queue" : "Direct Reading"));
 
-        TsbsSourceFunction.clearQueue("readings");
-        TsbsSourceFunction.clearQueue("diagnostics");
-        LogPrinter.debug("Queues cleared");
+        if (useSharedQueue) {
+            TsbsSourceFunction.clearQueue("readings");
+            TsbsSourceFunction.clearQueue("diagnostics");
+            LogPrinter.debug("Queues cleared for shared queue mode");
 
-        TsbsSourceFunction.restartReading("readings");
-        TsbsSourceFunction.restartReading("diagnostics");
-        LogPrinter.debug("File reading restarted");
+            TsbsSourceFunction.restartReading("readings");
+            TsbsSourceFunction.restartReading("diagnostics");
+            LogPrinter.debug("File reading restarted for shared queue mode");
+        } else {
+            LogPrinter.debug("Direct reading mode - no queue initialization needed");
+        }
 
         TestResult result = new TestResult(testCase.scenarioId, testCase.classification, testCase.description);
         result.startTime = System.currentTimeMillis();
@@ -207,6 +223,7 @@ public class TsbsTest {
         testCase.sql = testCase.sql.replace("\n", " ").replaceAll("\\s+", " ");
         LogPrinter.log("   - Starting test case: " + testCase.scenarioId);
         LogPrinter.log("   - Classification: " + testCase.classification);
+        LogPrinter.log("   - Reading mode: " + (useSharedQueue ? "Shared Queue" : "Direct Reading"));
         if (!testCase.description.isEmpty()) {
             LogPrinter.log("   - Description: " + testCase.description);
         }
@@ -240,7 +257,8 @@ public class TsbsTest {
             result.success = true;
 
             LogPrinter.log("   - Test passed - Records processed: " + result.recordsProcessed +
-                    " | Duration: " + result.duration + "ms");
+                    " | Duration: " + result.duration + "ms | Mode: " +
+                    (useSharedQueue ? "Shared Queue" : "Direct Reading"));
 
         } catch (Exception e) {
             result.endTime = System.currentTimeMillis();
@@ -248,13 +266,14 @@ public class TsbsTest {
             result.success = false;
             result.errorMessage = e.getMessage();
 
-            LogPrinter.log("   - Test failed - Duration: " + result.duration + "ms");
+            LogPrinter.log("   - Test failed - Duration: " + result.duration + "ms | Mode: " +
+                    (useSharedQueue ? "Shared Queue" : "Direct Reading"));
             LogPrinter.log("   - Error message: " + e.getMessage());
             LogPrinter.debug("Detailed error stack: " + e.getMessage());
             e.printStackTrace();
         }
 
-        LogPrinter.log("   - Waiting  10000 ms for resource release...");
+        LogPrinter.log("   - Waiting 1000 ms for resource release...");
         try {
             Thread.sleep(10000);
             LogPrinter.log("   - Resource release wait completed");
@@ -273,9 +292,12 @@ public class TsbsTest {
     public static TestSuiteSummary executeTestSuite(StreamTableEnvironment tableEnv,
             TestCaseConfig config,
             String specificScenarioId,
-            Integer parallelism) {
+            Integer parallelism,
+            Boolean useSharedQueue) {
+
         TestSuiteSummary summary = new TestSuiteSummary(System.currentTimeMillis());
         summary.parallelism = parallelism;
+        summary.useSharedQueue = useSharedQueue;
         List<TestResult> results = new ArrayList<>();
 
         List<TestCaseConfig.TestCase> testCasesToExecute = config.testCases;
@@ -303,6 +325,7 @@ public class TsbsTest {
         LogPrinter.log("Number of test cases to execute: " + testCasesToExecute.size());
         LogPrinter.log("Suite start time: " + new Date(summary.totalStartTime));
         LogPrinter.log("Parallelism level: " + parallelism);
+        LogPrinter.log("Reading mode: " + (useSharedQueue ? "Shared Queue" : "Direct Reading"));
 
         Map<String, List<TestCaseConfig.TestCase>> casesByClassification = new HashMap<>();
         for (TestCaseConfig.TestCase testCase : testCasesToExecute) {
@@ -321,7 +344,7 @@ public class TsbsTest {
             TestCaseConfig.TestCase testCase = testCasesToExecute.get(i);
             LogPrinter.log("Execution progress: (" + (i + 1) + "/" + testCasesToExecute.size() + ")");
 
-            TestResult result = executeTestCase(tableEnv, testCase);
+            TestResult result = executeTestCase(tableEnv, testCase, useSharedQueue);
             results.add(result);
 
             // Update classification statistics
@@ -339,10 +362,12 @@ public class TsbsTest {
         LogPrinter.log("Test suite execution completed");
         LogPrinter.log("Total duration: " + summary.totalDuration + "ms");
         LogPrinter.log("Parallelism: " + parallelism);
+        LogPrinter.log("Reading mode: " + (useSharedQueue ? "Shared Queue" : "Direct Reading"));
         LogPrinter.log("==========================================\n\n");
 
         // Generate detailed report
-        generateTestReport(results, summary);
+        generateLogReport(results, summary);
+        generateJsonReport(results, summary);
 
         return summary;
     }
@@ -350,7 +375,7 @@ public class TsbsTest {
     /**
      * Generate detailed test report
      */
-    public static void generateTestReport(List<TestResult> results, TestSuiteSummary summary) {
+    public static void generateLogReport(List<TestResult> results, TestSuiteSummary summary) {
         LogPrinter.log("Detailed test results summary report");
         LogPrinter.log("==========================================");
         SimpleDateFormat timeFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
@@ -374,19 +399,20 @@ public class TsbsTest {
                 + "%");
         LogPrinter.log(" * Total duration: " + summary.totalDuration + "ms (" +
                 String.format("%.2f", summary.totalDuration / 1000.0) + " seconds)");
-        LogPrinter.log(" * Parallelism level: " + summary.parallelism + "\n");
+        LogPrinter.log(" * Parallelism level: " + summary.parallelism);
+        LogPrinter.log(" * Reading mode: " + (summary.useSharedQueue ? "Shared Queue" : "Direct Reading") + "\n");
 
         // Detailed results table
         LogPrinter.log("Detailed results list:");
         LogPrinter.log(
-                "| Scenario ID | Classification | Records | Start Time              | End Time                | Duration(ms) | Status    |");
+                "| Scenario ID | Classification | Records   | Start Time              | End Time                | Duration(ms) | Status |");
         LogPrinter.log(
-                "|-------------|----------------|---------|-------------------------|-------------------------|--------------|-----------|");
+                "|-------------|----------------|-----------|-------------------------|-------------------------|--------------|--------|");
 
         for (TestResult result : results) {
             String status = result.success ? "Passed" : "Failed";
 
-            LogPrinter.log(String.format("| %-11s | %-14s | %7d | %-19s | %-18s | %12d | %s |",
+            LogPrinter.log(String.format("| %-11s | %-14s | %9d | %-19s | %-18s | %12d | %s |",
                     result.scenarioId,
                     result.classification,
                     result.recordsProcessed,
@@ -429,7 +455,71 @@ public class TsbsTest {
 
         LogPrinter.log("==========================================");
         if (LogPrinter.isOutputToFile()) {
-            LogPrinter.log("Full report saved to: " + LogPrinter.getOutputFilePath() + "\n");
+            if (LogPrinter.getLogFilePath() != null) {
+                LogPrinter.log("Log file saved to: " + LogPrinter.getLogFilePath());
+            }
+            if (LogPrinter.getJsonFilePath() != null) {
+                LogPrinter.log("JSON report saved to: " + LogPrinter.getJsonFilePath() + "\n");
+            }
+        }
+    }
+
+    private static void generateJsonReport(List<TestResult> results, TestSuiteSummary summary) {
+        SimpleDateFormat timeFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
+
+        try {
+            Map<String, Object> jsonReport = new LinkedHashMap<>();
+
+            Map<String, Object> summaryInfo = new LinkedHashMap<>();
+            summaryInfo.put("totalCases", summary.totalCases);
+            summaryInfo.put("passedCases", summary.passedCases);
+            summaryInfo.put("failedCases", summary.failedCases);
+            summaryInfo.put("successRate",
+                    summary.totalCases > 0 ? String.format("%.1f", (summary.passedCases * 100.0 / summary.totalCases))
+                            : "0");
+            summaryInfo.put("totalStartTime", timeFormat.format(new Date(summary.totalStartTime)));
+            summaryInfo.put("totalEndTime", timeFormat.format(new Date(summary.totalEndTime)));
+            summaryInfo.put("totalDuration", summary.totalDuration);
+            summaryInfo.put("averageDuration",
+                    String.format("%.2f", results.stream().mapToLong(r -> r.duration).average().orElse(0)));
+
+            if (!results.isEmpty()) {
+                TestResult slowest = results.stream()
+                        .max(Comparator.comparingLong(r -> r.duration))
+                        .orElse(results.get(0));
+
+                Map<String, Object> slowestCase = new LinkedHashMap<>();
+                slowestCase.put("scenarioId", slowest.scenarioId);
+                slowestCase.put("duration", slowest.duration);
+                summaryInfo.put("slowestCase", slowestCase);
+            }
+
+            jsonReport.put("summary", summaryInfo);
+
+            List<Map<String, Object>> testResults = new ArrayList<>();
+            for (TestResult result : results) {
+                Map<String, Object> testResult = new LinkedHashMap<>();
+                testResult.put("scenarioId", result.scenarioId);
+                testResult.put("classification", result.classification);
+                testResult.put("records", result.recordsProcessed);
+                testResult.put("startTime", timeFormat.format(new Date(result.startTime)));
+                testResult.put("endTime", timeFormat.format(new Date(result.endTime)));
+                testResult.put("duration", result.duration);
+                testResult.put("status", result.success ? "Passed" : "Failed");
+
+                testResults.add(testResult);
+            }
+            jsonReport.put("results", testResults);
+
+            // 输出JSON报告
+            ObjectMapper mapper = new ObjectMapper();
+            mapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+            mapper.enable(SerializationFeature.INDENT_OUTPUT);
+            String jsonOutput = mapper.writeValueAsString(jsonReport);
+            LogPrinter.logJson(jsonOutput);
+
+        } catch (Exception e) {
+            LogPrinter.error("Failed to generate JSON report: " + e.getMessage());
         }
     }
 
@@ -466,16 +556,30 @@ public class TsbsTest {
             }
 
             // Initialize file output if specified
-            if (options.outputFilePath != null && !options.outputFilePath.trim().isEmpty()) {
-                String effectiveOutputPath = getEffectiveOutputFilePath(options.outputFilePath);
-                LogPrinter.openFile(effectiveOutputPath);
+            if ((options.logFilePath != null && !options.logFilePath.trim().isEmpty()) ||
+                    (options.jsonFilePath != null && !options.jsonFilePath.trim().isEmpty())) {
+
+                String effectiveLogPath = null;
+                String effectiveJsonPath = null;
+
+                if (options.logFilePath != null && !options.logFilePath.trim().isEmpty()) {
+                    effectiveLogPath = getEffectiveOutputFilePath(options.logFilePath);
+                }
+
+                if (options.jsonFilePath != null && !options.jsonFilePath.trim().isEmpty()) {
+                    effectiveJsonPath = getEffectiveOutputFilePath(options.jsonFilePath);
+                }
+
+                LogPrinter.openFiles(effectiveLogPath, effectiveJsonPath);
             }
 
             LogPrinter.log("Current working directory: " + System.getProperty("user.dir"));
-            LogPrinter.log("Output file path: " +
-                    (LogPrinter.isOutputToFile() ? LogPrinter.getOutputFilePath()
-                            : "Not specified (console only)"));
+            LogPrinter.log("Log file path: " +
+                    (LogPrinter.getLogFilePath() != null ? LogPrinter.getLogFilePath() : "Not specified"));
+            LogPrinter.log("JSON file path: " +
+                    (LogPrinter.getJsonFilePath() != null ? LogPrinter.getJsonFilePath() : "Not specified"));
             LogPrinter.log("Parallelism level: " + options.parallelism);
+            LogPrinter.log("Reading mode: " + (options.useSharedQueue ? "Shared Queue" : "Direct Reading"));
 
             // Determine data file paths
             String effectiveDataFilePath1;
@@ -539,7 +643,8 @@ public class TsbsTest {
                     ") WITH (\n" +
                     "    'connector' = 'tsbs',\n" +
                     "    'data-type' = 'readings',\n" +
-                    "    'path' = 'file://" + effectiveDataFilePath1 + "'\n" +
+                    "    'path' = 'file://" + effectiveDataFilePath1 + "',\n" +
+                    "    'direct-reading' = '" + !options.useSharedQueue + "'\n" +
                     ")";
 
             tableEnv.executeSql(createTableDDL);
@@ -563,7 +668,8 @@ public class TsbsTest {
                     ") WITH (\n" +
                     "    'connector' = 'tsbs',\n" +
                     "    'data-type' = 'diagnostics',\n" +
-                    "    'path' = 'file://" + effectiveDataFilePath2 + "'\n" +
+                    "    'path' = 'file://" + effectiveDataFilePath2 + "',\n" +
+                    "    'direct-reading' = '" + !options.useSharedQueue + "'\n" +
                     ")";
 
             tableEnv.executeSql(createDiagnosticsTableDDL);
@@ -574,9 +680,9 @@ public class TsbsTest {
             LogPrinter.log("Test configuration loaded successfully");
             LogPrinter.log("Total test cases loaded: " + config.testCases.size());
 
-            // Execute test suite with parallelism parameter
+            // Execute test suite with all parameters
             TestSuiteSummary summary = executeTestSuite(tableEnv, config, options.scenarioId,
-                    options.parallelism);
+                    options.parallelism, options.useSharedQueue);
 
             int exitCode = summary.failedCases > 0 ? 1 : 0;
             LogPrinter.log("Exit code: " + exitCode);
@@ -594,9 +700,11 @@ public class TsbsTest {
             System.exit(1);
         } finally {
             // Cleanup shared queues
-            TsbsSourceFunction.shutdownAll();
+            if (options.useSharedQueue) {
+                TsbsSourceFunction.shutdownAll();
+            }
             // Close file output
-            LogPrinter.closeFile();
+            LogPrinter.closeFiles();
         }
     }
 }

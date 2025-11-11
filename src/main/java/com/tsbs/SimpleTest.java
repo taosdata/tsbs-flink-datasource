@@ -45,6 +45,7 @@ public class SimpleTest {
                                 ") WITH (\n" +
                                 "    'connector' = 'tsbs',\n" +
                                 "    'data-type' = 'readings',\n" +
+                                "    'direct-reading' = 'true',\n" +
                                 "    'path' = 'file:///root/tsbs-flink-datasource/src/main/resources/data/default_readings.csv'\n"
                                 +
                                 ")";
@@ -67,6 +68,7 @@ public class SimpleTest {
                                 ") WITH (\n" +
                                 "    'connector' = 'tsbs',\n" + //
                                 "    'data-type' = 'diagnostics',\n" +
+                                "    'direct-reading' = 'true',\n" +
                                 "    'path' = 'file:///root/tsbs-flink-datasource/src/main/resources/data/default_diagnostics.csv'\n"
                                 +
                                 ");";
@@ -74,7 +76,7 @@ public class SimpleTest {
 
                 // String sql = "SELECT * FROM readings LIMIT 10";
                 // String sql = "SELECT AVG(fuel_consumption) FROM readings";
-                String sql = "SELECT * FROM diagnostics";
+                String sql = "SELECT ts, name FROM diagnostics";
 
                 sql = sql.replace("\n", " ").replace("\r", " ").replaceAll("\\s+", " ");
                 LogPrinter.log(sql);

@@ -27,6 +27,12 @@ public class TsbsTableFactory implements DynamicTableSourceFactory {
             .defaultValue("readings")
             .withDescription("Type of data: 'readings' or 'diagnostics'");
 
+    public static final ConfigOption<Boolean> DIRECT_READING = ConfigOptions
+            .key("direct-reading")
+            .booleanType()
+            .defaultValue(true)
+            .withDescription("Whether to use direct reading mode where each consumer reads file directly");
+
     @Override
     public String factoryIdentifier() {
         return IDENTIFIER;
@@ -43,6 +49,7 @@ public class TsbsTableFactory implements DynamicTableSourceFactory {
     public Set<ConfigOption<?>> optionalOptions() {
         final Set<ConfigOption<?>> options = new HashSet<>();
         options.add(DATA_TYPE);
+        options.add(DIRECT_READING);
         return options;
     }
 
@@ -50,11 +57,13 @@ public class TsbsTableFactory implements DynamicTableSourceFactory {
     public DynamicTableSource createDynamicTableSource(Context context) {
         final FactoryUtil.TableFactoryHelper helper = FactoryUtil.createTableFactoryHelper(this, context);
         helper.validate();
+
         final String path = helper.getOptions().get(PATH);
         final String dataType = helper.getOptions().get(DATA_TYPE);
+        final Boolean directReading = helper.getOptions().get(DIRECT_READING);
         final org.apache.flink.table.types.DataType producedDataType = context.getCatalogTable().getSchema()
                 .toPhysicalRowDataType();
 
-        return new TsbsTableSource(path, producedDataType, dataType);
+        return new TsbsTableSource(path, producedDataType, dataType, directReading);
     }
 }

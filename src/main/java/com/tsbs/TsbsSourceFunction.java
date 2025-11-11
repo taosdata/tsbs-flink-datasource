@@ -16,8 +16,7 @@ import java.util.Map;
 import java.util.HashMap;
 
 /**
- * TSBS Data Source Function with Shared Queue Architecture
- * Single producer reads file, multiple consumers process data in parallel
+ * TSBS Data Source Function
  */
 public class TsbsSourceFunction extends RichParallelSourceFunction<RowData> {
     private static final Map<String, SharedQueueManager> queueManagers = new HashMap<>();
@@ -25,15 +24,19 @@ public class TsbsSourceFunction extends RichParallelSourceFunction<RowData> {
 
     private final String filePath;
     private final String dataType;
+    private final boolean dataTypeIsReadings;
+    private final boolean useDirectReading;
     private volatile boolean isRunning = true;
 
     private transient int subtaskIndex;
     private transient int numSubtasks;
     private transient SharedQueueManager queueManager;
 
-    public TsbsSourceFunction(String filePath, String dataType) {
+    public TsbsSourceFunction(String filePath, String dataType, boolean useDirectReading) {
         this.filePath = filePath;
         this.dataType = dataType;
+        this.useDirectReading = useDirectReading;
+        this.dataTypeIsReadings = "readings".equalsIgnoreCase(dataType) ? true : false;
     }
 
     @Override
@@ -41,11 +44,13 @@ public class TsbsSourceFunction extends RichParallelSourceFunction<RowData> {
         this.subtaskIndex = getRuntimeContext().getIndexOfThisSubtask();
         this.numSubtasks = getRuntimeContext().getNumberOfParallelSubtasks();
 
-        // Initialize shared queue manager
-        initializeQueueManager();
+        LogPrinter.debug("Datasource initialized - Data type: " + dataType +
+                " - Subtask: " + subtaskIndex + "/" + numSubtasks +
+                " - Mode: " + (useDirectReading ? "Direct Reading" : "Shared Queue"));
 
-        LogPrinter.debug("Consumer initialized - Data type: " + dataType +
-                " - Subtask: " + subtaskIndex + "/" + numSubtasks);
+        if (!useDirectReading) {
+            initializeQueueManager();
+        }
     }
 
     /**
@@ -69,6 +74,70 @@ public class TsbsSourceFunction extends RichParallelSourceFunction<RowData> {
 
     @Override
     public void run(SourceContext<RowData> ctx) throws Exception {
+        if (useDirectReading) {
+            runDirectReadingMode(ctx);
+        } else {
+            runSharedQueueMode(ctx);
+        }
+    }
+
+    private void runDirectReadingMode(SourceContext<RowData> ctx) throws Exception {
+        LogPrinter.debug("Starting direct file reading - Data type: " + dataType +
+                " - Subtask: " + subtaskIndex + "/" + numSubtasks);
+
+        File file = new File(filePath.replace("file://", ""));
+        if (!file.exists() || !file.isFile()) {
+            LogPrinter.error("File does not exist or is not a file: " + filePath);
+            return;
+        }
+
+        long startTime = System.currentTimeMillis();
+        long recordsProcessed = 0;
+
+        try (FileReader fileReader = new FileReader(file);
+                BufferedReader bufferedReader = new BufferedReader(fileReader)) {
+
+            String line;
+            long lineNumber = 0;
+
+            while ((line = bufferedReader.readLine()) != null && isRunning) {
+                lineNumber++;
+
+                if (line.trim().isEmpty()) {
+                    continue;
+                }
+
+                long dataRowIndex = lineNumber - 1;
+
+                if (dataRowIndex % numSubtasks == subtaskIndex) {
+                    RowData rowData = CsvParser.parseCsvLineToRowData(line, dataTypeIsReadings);
+                    if (rowData != null) {
+                        synchronized (ctx.getCheckpointLock()) {
+                            ctx.collect(rowData);
+                        }
+                        recordsProcessed++;
+
+                        if (recordsProcessed % 10000 == 0) {
+                            LogPrinter.debug(dataType + " - Consumer " + subtaskIndex +
+                                    " processed: " + recordsProcessed + " records");
+                        }
+                    }
+                }
+            }
+
+            long endTime = System.currentTimeMillis();
+            LogPrinter.debug("Direct reading completed - Data type: " + dataType +
+                    " - Subtask: " + subtaskIndex +
+                    " - Total records: " + recordsProcessed +
+                    " - Duration: " + (endTime - startTime) + "ms");
+
+        } catch (Exception e) {
+            LogPrinter.error("File reading exception in direct mode: " + dataType + " - " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+
+    private void runSharedQueueMode(SourceContext<RowData> ctx) throws Exception {
         LogPrinter.debug("Consumer started processing - Data type: " + dataType +
                 " - Subtask: " + subtaskIndex);
 
@@ -155,6 +224,7 @@ class SharedQueueManager {
     private final String filePath;
     private final String dataType;
     private final BlockingQueue<RowData> dataQueue;
+    private final boolean dataTypeIsReadings;
     private volatile Thread fileReaderThread;
     private final AtomicBoolean isReaderRunning = new AtomicBoolean(false);
     private final AtomicLong producedCount = new AtomicLong(0);
@@ -162,13 +232,14 @@ class SharedQueueManager {
     private final AtomicBoolean shouldRestart = new AtomicBoolean(false);
 
     // Queue configuration
-    private static final int QUEUE_CAPACITY = 1000000;
+    private static final int QUEUE_CAPACITY = 100000;
     private static final int BATCH_SIZE = 1000;
 
     public SharedQueueManager(String filePath, String dataType) {
         this.filePath = filePath;
         this.dataType = dataType;
         this.dataQueue = new LinkedBlockingQueue<>(QUEUE_CAPACITY);
+        this.dataTypeIsReadings = "readings".equalsIgnoreCase(dataType) ? true : false;
     }
 
     /**
@@ -240,12 +311,11 @@ class SharedQueueManager {
             while ((line = bufferedReader.readLine()) != null && isReaderRunning.get()) {
                 lineNumber++;
 
-                // Skip empty lines and header row
                 if (line.trim().isEmpty() || lineNumber == 1)
                     continue;
 
                 // Parse CSV line
-                RowData rowData = parseCsvLineToRowData(line);
+                RowData rowData = CsvParser.parseCsvLineToRowData(line, dataTypeIsReadings);
                 if (rowData != null) {
                     // Non-blocking queue insertion
                     if (dataQueue.offer(rowData, 100, TimeUnit.MILLISECONDS)) {
@@ -335,16 +405,19 @@ class SharedQueueManager {
     public long getConsumedCount() {
         return consumedCount.get();
     }
+}
+
+class CsvParser {
 
     /**
      * Parse CSV line to RowData
      */
-    private RowData parseCsvLineToRowData(String line) {
+    public static RowData parseCsvLineToRowData(String line, boolean dataTypeIsReadings) {
         try (StringReader reader = new StringReader(line);
                 CSVParser parser = new CSVParser(reader, CSVFormat.DEFAULT)) {
 
             for (CSVRecord record : parser) {
-                return parseRecordToRowData(record, dataType);
+                return parseRecordToRowData(record, dataTypeIsReadings);
             }
         } catch (Exception e) {
             LogPrinter.error("Failed to parse CSV line: " + line);
@@ -356,18 +429,15 @@ class SharedQueueManager {
     /**
      * Parse record to RowData
      */
-    private RowData parseRecordToRowData(CSVRecord record, String dataType) {
-        if ("readings".equalsIgnoreCase(dataType)) {
+    private static RowData parseRecordToRowData(CSVRecord record, boolean dataTypeIsReadings) {
+        if (dataTypeIsReadings) {
             return parseReadingsRecord(record);
-        } else if ("diagnostics".equalsIgnoreCase(dataType)) {
-            return parseDiagnosticsRecord(record);
         } else {
-            LogPrinter.error("Unknown data type: " + dataType);
-            return null;
+            return parseDiagnosticsRecord(record);
         }
     }
 
-    private RowData parseReadingsRecord(CSVRecord record) {
+    private static RowData parseReadingsRecord(CSVRecord record) {
         final org.apache.flink.table.data.GenericRowData rowData = new org.apache.flink.table.data.GenericRowData(16);
 
         try {
@@ -406,7 +476,7 @@ class SharedQueueManager {
         return rowData;
     }
 
-    private RowData parseDiagnosticsRecord(CSVRecord record) {
+    private static RowData parseDiagnosticsRecord(CSVRecord record) {
         final org.apache.flink.table.data.GenericRowData rowData = new org.apache.flink.table.data.GenericRowData(12);
 
         try {
@@ -441,7 +511,7 @@ class SharedQueueManager {
         return rowData;
     }
 
-    private String safeGet(CSVRecord record, int index) {
+    private static String safeGet(CSVRecord record, int index) {
         if (record == null || index >= record.size()) {
             return null;
         }
@@ -450,7 +520,7 @@ class SharedQueueManager {
                 "null".equalsIgnoreCase(value) || "NULL".equalsIgnoreCase(value)) ? "" : value;
     }
 
-    private Long parseLong(String value) {
+    private static Long parseLong(String value) {
         if (value == null || value.trim().isEmpty()) {
             return null;
         }
@@ -462,7 +532,7 @@ class SharedQueueManager {
         }
     }
 
-    private Double parseDouble(String value) {
+    private static Double parseDouble(String value) {
         if (value == null || value.trim().isEmpty()) {
             return null;
         }
@@ -474,14 +544,14 @@ class SharedQueueManager {
         }
     }
 
-    private StringData parseString(String value) {
+    private static StringData parseString(String value) {
         if (value == null || value.trim().isEmpty()) {
             return null;
         }
         return StringData.fromString(value.trim());
     }
 
-    private TimestampData parseTimestampFromMillis(String timestampStr) {
+    private static TimestampData parseTimestampFromMillis(String timestampStr) {
         if (timestampStr == null || timestampStr.trim().isEmpty()) {
             return null;
         }
