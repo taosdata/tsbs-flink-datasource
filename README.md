@@ -1,4 +1,3 @@
-
 TSBS Flink Test Environment Setup and Usage Guide
 
 # 1. Java Installation
@@ -298,16 +297,18 @@ SELECT * FROM readings;
 
 The project supports the following command-line parameters:
 
-| Parameter     | Short | Description                       | Default Value            |
-| ------------- | ----- | --------------------------------- |------------------------- |
-| --config      | -c    | Test case configuration file path | Built-in default config  |
-| --data1       | -d1   | Readings data file path           | Built-in default data    |
-| --data2       | -d2   | Diagnostics data file path        | Built-in default data    |
-| --output      | -o    | Test result output path           | ./tsbs-flink-results.txt |
-| --scenario    | -s    | Execute specific test scenario    | All scenarios            |
-| --parallelism | -s    | Flink parallelism level           | 4                        |
-| --help        | -h    | Show help information             | -                        |
-| --version     | -v    | Show version information          | -                        |
+| Parameter      | Short | Description                       | Default Value            |
+| -------------- | ----- | --------------------------------- | ------------------------ |
+| --config       | -c    | Test case configuration file path | Built-in default config  |
+| --data1        | -d1   | Readings data file path           | Built-in default data    |
+| --data2        | -d2   | Diagnostics data file path        | Built-in default data    |
+| --log-output   | -l    | Log file output path              | ./tsbs-flink-log.txt     |
+| --json-output  | -j    | JSON result file output path      | ./tsbs-flink-result.json |
+| --scenario     | -s    | Execute specific test scenario    | All scenarios            |
+| --parallelism  | -p    | Flink parallelism level           | 4                        |
+| --shared-queue | -q    | Use shared queue mode             | false                    |
+| --help         | -h    | Show help information             | -                        |
+| --version      | -v    | Show version information          | -                        |
 
 ## 7.2 Execute Test Examples
 
@@ -321,52 +322,95 @@ $FLINK_HOME/bin/flink run target/tsbs-flink-datasource-1.0-SNAPSHOT.jar
 # Execute specific test scenario with custom parallelism
 $FLINK_HOME/bin/flink run target/tsbs-flink-datasource-1.0-SNAPSHOT.jar --scenario A1 --parallelism 2
 
-# Use custom configuration and data files
+# Use custom configuration and data files with separate log and JSON output
 $FLINK_HOME/bin/flink run target/tsbs-flink-datasource-1.0-SNAPSHOT.jar \
     --config /path/to/custom_config.yaml \
     --data1 /path/to/readings.csv \
     --data2 /path/to/diagnostics.csv \
-    --output ./custom-results.txt \
+    --log-output ./custom-log.txt \
+    --json-output ./custom-results.json \
     --parallelism 8
-    
+
 ```
 
 ## 7.3 View Test Results
 
-Test results will be output to both
+Test results will be output to:
 
  - Console: Real-time execution logs
- - Result file: Detailed test report (default: tsbs-flink-results.txt)
+ - Log file: Detailed test report with execution logs (default: tsbs-flink-log.txt)
+ - JSON file: Structured test results in JSON format (default: tsbs-flink-result.json)
 
-The test report includes execution status, execution time and other detailed information for each scenario, such as
+The log file includes execution status, execution time and other detailed information for each scenario, such as:
+
 
 ```
 | Scenario ID | Classification | Records | Start Time   | End Time     | Duration(ms) | Status |
-|-------------|----------------|---------|--------------|--------------|--------------|--------|
-| A1          | Summary        |       1 | 14:31:19.384 | 14:31:22.812 |         3428 | Passed |
-| A2          | Summary        |       4 | 14:31:22.813 | 14:31:23.602 |          789 | Passed |
-| A3          | Summary        |       5 | 14:31:23.602 | 14:31:24.187 |          585 | Passed |
-| A4          | Summary        |       7 | 14:31:24.187 | 14:31:24.493 |          306 | Passed |
-| A5          | Summary        |       5 | 14:31:24.494 | 14:31:25.027 |          533 | Passed |
-| A6          | Summary        |       1 | 14:31:25.027 | 14:31:25.720 |          693 | Passed |
-| A7          | Summary        |       1 | 14:31:25.721 | 14:31:26.014 |          293 | Passed |
-| A8          | Summary        |       1 | 14:31:26.014 | 14:31:26.544 |          530 | Passed |
-| A9          | Summary        |       0 | 14:31:26.545 | 14:31:26.925 |          380 | Passed |
-| F1          | Fleet          |       6 | 14:31:26.926 | 14:31:27.568 |          642 | Passed |
-| F2          | Fleet          |       8 | 14:31:27.569 | 14:31:28.027 |          458 | Passed |
-| F3          | Fleet          |       3 | 14:31:28.028 | 14:31:28.374 |          346 | Passed |
-| F4          | Fleet          |       3 | 14:31:28.374 | 14:31:28.800 |          426 | Passed |
-| F5          | Fleet          |       3 | 14:31:28.801 | 14:31:29.086 |          285 | Passed |
-| F6          | Fleet          |      94 | 14:31:29.086 | 14:31:29.391 |          305 | Passed |
-| F7          | Fleet          |      81 | 14:31:29.391 | 14:31:29.669 |          278 | Passed |
-| F8          | Fleet          |      94 | 14:31:29.669 | 14:31:29.991 |          322 | Passed |
-| T1          | Vehicle        |       4 | 14:31:29.992 | 14:31:30.251 |          259 | Passed |
-| T2          | Vehicle        |       2 | 14:31:30.251 | 14:31:30.522 |          271 | Passed |
-| T3          | Vehicle        |       2 | 14:31:30.523 | 14:31:30.820 |          297 | Passed |
-| T4          | Vehicle        |       5 | 14:31:30.820 | 14:31:31.146 |          326 | Passed |
-| T5          | Vehicle        |       3 | 14:31:31.146 | 14:31:31.410 |          264 | Passed |
-| T6          | Vehicle        |       4 | 14:31:31.410 | 14:31:31.682 |          272 | Passed |
-| T7          | Vehicle        |       5 | 14:31:31.682 | 14:31:32.078 |          396 | Passed |
-| T8          | Vehicle        |       1 | 14:31:32.079 | 14:31:32.424 |          345 | Passed |
-| T9          | Vehicle        |       1 | 14:31:32.424 | 14:31:32.683 |          259 | Passed |
+| ----------- | -------------- | ------- | ------------ | ------------ | ------------ | ------ |
+| A1          | Summary        | 1       | 14:31:19.384 | 14:31:22.812 | 3428         | Passed |
+| A2          | Summary        | 4       | 14:31:22.813 | 14:31:23.602 | 789          | Passed |
+| A3          | Summary        | 5       | 14:31:23.602 | 14:31:24.187 | 585          | Passed |
+| A4          | Summary        | 7       | 14:31:24.187 | 14:31:24.493 | 306          | Passed |
+| A5          | Summary        | 5       | 14:31:24.494 | 14:31:25.027 | 533          | Passed |
+| A6          | Summary        | 1       | 14:31:25.027 | 14:31:25.720 | 693          | Passed |
+| A7          | Summary        | 1       | 14:31:25.721 | 14:31:26.014 | 293          | Passed |
+| A8          | Summary        | 1       | 14:31:26.014 | 14:31:26.544 | 530          | Passed |
+| A9          | Summary        | 0       | 14:31:26.545 | 14:31:26.925 | 380          | Passed |
+| F1          | Fleet          | 6       | 14:31:26.926 | 14:31:27.568 | 642          | Passed |
+| F2          | Fleet          | 8       | 14:31:27.569 | 14:31:28.027 | 458          | Passed |
+| F3          | Fleet          | 3       | 14:31:28.028 | 14:31:28.374 | 346          | Passed |
+| F4          | Fleet          | 3       | 14:31:28.374 | 14:31:28.800 | 426          | Passed |
+| F5          | Fleet          | 3       | 14:31:28.801 | 14:31:29.086 | 285          | Passed |
+| F6          | Fleet          | 94      | 14:31:29.086 | 14:31:29.391 | 305          | Passed |
+| F7          | Fleet          | 81      | 14:31:29.391 | 14:31:29.669 | 278          | Passed |
+| F8          | Fleet          | 94      | 14:31:29.669 | 14:31:29.991 | 322          | Passed |
+| T1          | Vehicle        | 4       | 14:31:29.992 | 14:31:30.251 | 259          | Passed |
+| T2          | Vehicle        | 2       | 14:31:30.251 | 14:31:30.522 | 271          | Passed |
+| T3          | Vehicle        | 2       | 14:31:30.523 | 14:31:30.820 | 297          | Passed |
+| T4          | Vehicle        | 5       | 14:31:30.820 | 14:31:31.146 | 326          | Passed |
+| T5          | Vehicle        | 3       | 14:31:31.146 | 14:31:31.410 | 264          | Passed |
+| T6          | Vehicle        | 4       | 14:31:31.410 | 14:31:31.682 | 272          | Passed |
+| T7          | Vehicle        | 5       | 14:31:31.682 | 14:31:32.078 | 396          | Passed |
+| T8          | Vehicle        | 1       | 14:31:32.079 | 14:31:32.424 | 345          | Passed |
+| T9          | Vehicle        | 1       | 14:31:32.424 | 14:31:32.683 | 259          | Passed |
+
+The JSON file contains structured test results with the following format (based on actual test execution):
+
+```json
+{
+  "summary": {
+    "totalCases": 2,
+    "passedCases": 2,
+    "failedCases": 0,
+    "successRate": "100.0",
+    "totalStartTime": "2025-11-11 15:59:19.984",
+    "totalEndTime": "2025-11-11 15:59:45.556",
+    "totalDuration": 25572,
+    "averageDuration": "2098.00",
+    "slowestCase": {
+      "scenarioId": "A1",
+      "duration": 2968
+    }
+  },
+  "results": [
+    {
+      "scenarioId": "A1",
+      "classification": "Summary",
+      "records": 1,
+      "startTime": "2025-11-11 15:59:19.996",
+      "endTime": "2025-11-11 15:59:22.964",
+      "duration": 2968,
+      "status": "Passed"
+    },
+    {
+      "scenarioId": "A2",
+      "classification": "Summary",
+      "records": 4,
+      "startTime": "2025-11-11 15:59:32.969",
+      "endTime": "2025-11-11 15:59:34.197",
+      "duration": 1228,
+      "status": "Passed"
+    }
+  ]
+}
 ```
