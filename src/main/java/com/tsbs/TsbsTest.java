@@ -266,7 +266,7 @@ public class TsbsTest {
             e.printStackTrace();
         }
 
-        LogPrinter.log("   - Waiting 10000 ms for resource release...");
+        LogPrinter.log("   - Waiting 1000 ms for resource release...");
         try {
             Thread.sleep(10000);
             LogPrinter.log("   - Resource release wait completed");

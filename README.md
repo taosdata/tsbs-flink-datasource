@@ -313,16 +313,16 @@ The project supports the following command-line parameters:
 
 ```bash
 # View help information
-$FLINK_HOME/bin/flink run --execution-mode local target/tsbs-flink-datasource-1.0-SNAPSHOT.jar --help
+$FLINK_HOME/bin/flink run target/tsbs-flink-datasource-1.0-SNAPSHOT.jar --help
 
 # Execute all test scenarios
-$FLINK_HOME/bin/flink run --execution-mode local target/tsbs-flink-datasource-1.0-SNAPSHOT.jar
+$FLINK_HOME/bin/flink run target/tsbs-flink-datasource-1.0-SNAPSHOT.jar
 
 # Execute specific test scenario with custom parallelism
-$FLINK_HOME/bin/flink run --execution-mode local target/tsbs-flink-datasource-1.0-SNAPSHOT.jar --scenario A1 --parallelism 2
+$FLINK_HOME/bin/flink run target/tsbs-flink-datasource-1.0-SNAPSHOT.jar --scenario A1 --parallelism 2
 
 # Use custom configuration and data files
-$FLINK_HOME/bin/flink run --execution-mode local target/tsbs-flink-datasource-1.0-SNAPSHOT.jar \
+$FLINK_HOME/bin/flink run target/tsbs-flink-datasource-1.0-SNAPSHOT.jar \
     --config /path/to/custom_config.yaml \
     --data1 /path/to/readings.csv \
     --data2 /path/to/diagnostics.csv \
