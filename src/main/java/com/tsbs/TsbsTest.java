@@ -10,6 +10,8 @@ import org.apache.flink.util.CloseableIterator;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
+import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.SerializationFeature;
 
 import java.io.*;
 import java.nio.file.Files;
@@ -43,11 +45,11 @@ public class TsbsTest {
 
         @Parameter(names = { "-l",
                 "--log-output" }, description = "Output log file path (default: ./tsbs-flink-log.txt)")
-        public String logFilePath = "./tsbs-flink-log.txt";
+        public String logFilePath = "tsbs-flink-log.txt";
 
         @Parameter(names = { "-j",
                 "--json-output" }, description = "Output results file path (default: ./tsbs-flink-result.json)")
-        public String jsonFilePath = "./tsbs-flink-result.txt";
+        public String jsonFilePath = "tsbs-flink-result.json";
 
         @Parameter(names = { "-p", "--parallelism" }, description = "Flink parallelism level (default: 4)")
         public Integer parallelism = 4;
@@ -364,7 +366,8 @@ public class TsbsTest {
         LogPrinter.log("==========================================\n\n");
 
         // Generate detailed report
-        generateTestReport(results, summary);
+        generateLogReport(results, summary);
+        generateJsonReport(results, summary);
 
         return summary;
     }
@@ -372,7 +375,7 @@ public class TsbsTest {
     /**
      * Generate detailed test report
      */
-    public static void generateTestReport(List<TestResult> results, TestSuiteSummary summary) {
+    public static void generateLogReport(List<TestResult> results, TestSuiteSummary summary) {
         LogPrinter.log("Detailed test results summary report");
         LogPrinter.log("==========================================");
         SimpleDateFormat timeFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
@@ -453,11 +456,70 @@ public class TsbsTest {
         LogPrinter.log("==========================================");
         if (LogPrinter.isOutputToFile()) {
             if (LogPrinter.getLogFilePath() != null) {
-                LogPrinter.log("Log file saved to: " + LogPrinter.getLogFilePath() + "\n");
+                LogPrinter.log("Log file saved to: " + LogPrinter.getLogFilePath());
             }
             if (LogPrinter.getJsonFilePath() != null) {
                 LogPrinter.log("JSON report saved to: " + LogPrinter.getJsonFilePath() + "\n");
             }
+        }
+    }
+
+    private static void generateJsonReport(List<TestResult> results, TestSuiteSummary summary) {
+        SimpleDateFormat timeFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
+
+        try {
+            Map<String, Object> jsonReport = new LinkedHashMap<>();
+
+            Map<String, Object> summaryInfo = new LinkedHashMap<>();
+            summaryInfo.put("totalCases", summary.totalCases);
+            summaryInfo.put("passedCases", summary.passedCases);
+            summaryInfo.put("failedCases", summary.failedCases);
+            summaryInfo.put("successRate",
+                    summary.totalCases > 0 ? String.format("%.1f", (summary.passedCases * 100.0 / summary.totalCases))
+                            : "0");
+            summaryInfo.put("totalStartTime", timeFormat.format(new Date(summary.totalStartTime)));
+            summaryInfo.put("totalEndTime", timeFormat.format(new Date(summary.totalEndTime)));
+            summaryInfo.put("totalDuration", summary.totalDuration);
+            summaryInfo.put("averageDuration",
+                    String.format("%.2f", results.stream().mapToLong(r -> r.duration).average().orElse(0)));
+
+            if (!results.isEmpty()) {
+                TestResult slowest = results.stream()
+                        .max(Comparator.comparingLong(r -> r.duration))
+                        .orElse(results.get(0));
+
+                Map<String, Object> slowestCase = new LinkedHashMap<>();
+                slowestCase.put("scenarioId", slowest.scenarioId);
+                slowestCase.put("duration", slowest.duration);
+                summaryInfo.put("slowestCase", slowestCase);
+            }
+
+            jsonReport.put("summary", summaryInfo);
+
+            List<Map<String, Object>> testResults = new ArrayList<>();
+            for (TestResult result : results) {
+                Map<String, Object> testResult = new LinkedHashMap<>();
+                testResult.put("scenarioId", result.scenarioId);
+                testResult.put("classification", result.classification);
+                testResult.put("records", result.recordsProcessed);
+                testResult.put("startTime", timeFormat.format(new Date(result.startTime)));
+                testResult.put("endTime", timeFormat.format(new Date(result.endTime)));
+                testResult.put("duration", result.duration);
+                testResult.put("status", result.success ? "Passed" : "Failed");
+
+                testResults.add(testResult);
+            }
+            jsonReport.put("results", testResults);
+
+            // 输出JSON报告
+            ObjectMapper mapper = new ObjectMapper();
+            mapper.setSerializationInclusion(JsonInclude.Include.NON_NULL);
+            mapper.enable(SerializationFeature.INDENT_OUTPUT);
+            String jsonOutput = mapper.writeValueAsString(jsonReport);
+            LogPrinter.logJson(jsonOutput);
+
+        } catch (Exception e) {
+            LogPrinter.error("Failed to generate JSON report: " + e.getMessage());
         }
     }
 
