@@ -41,8 +41,13 @@ public class TsbsTest {
         @Parameter(names = { "-s", "--scenario" }, description = "Execute specific scenario ID only")
         public String scenarioId = null;
 
-        @Parameter(names = { "-o", "--output" }, description = "Output results file path")
-        public String outputFilePath = "./tsbs-flink-results.txt";
+        @Parameter(names = { "-l",
+                "--log-output" }, description = "Output log file path (default: ./tsbs-flink-log.txt)")
+        public String logFilePath = "./tsbs-flink-log.txt";
+
+        @Parameter(names = { "-j",
+                "--json-output" }, description = "Output results file path (default: ./tsbs-flink-result.json)")
+        public String jsonFilePath = "./tsbs-flink-result.txt";
 
         @Parameter(names = { "-p", "--parallelism" }, description = "Flink parallelism level (default: 4)")
         public Integer parallelism = 4;
@@ -397,14 +402,14 @@ public class TsbsTest {
         // Detailed results table
         LogPrinter.log("Detailed results list:");
         LogPrinter.log(
-                "| Scenario ID | Classification | Records | Start Time              | End Time                | Duration(ms) | Status    |");
+                "| Scenario ID | Classification | Records   | Start Time              | End Time                | Duration(ms) | Status |");
         LogPrinter.log(
-                "|-------------|----------------|---------|-------------------------|-------------------------|--------------|-----------|");
+                "|-------------|----------------|-----------|-------------------------|-------------------------|--------------|--------|");
 
         for (TestResult result : results) {
             String status = result.success ? "Passed" : "Failed";
 
-            LogPrinter.log(String.format("| %-11s | %-14s | %7d | %-19s | %-18s | %12d | %s |",
+            LogPrinter.log(String.format("| %-11s | %-14s | %9d | %-19s | %-18s | %12d | %s |",
                     result.scenarioId,
                     result.classification,
                     result.recordsProcessed,
@@ -447,7 +452,12 @@ public class TsbsTest {
 
         LogPrinter.log("==========================================");
         if (LogPrinter.isOutputToFile()) {
-            LogPrinter.log("Full report saved to: " + LogPrinter.getOutputFilePath() + "\n");
+            if (LogPrinter.getLogFilePath() != null) {
+                LogPrinter.log("Log file saved to: " + LogPrinter.getLogFilePath() + "\n");
+            }
+            if (LogPrinter.getJsonFilePath() != null) {
+                LogPrinter.log("JSON report saved to: " + LogPrinter.getJsonFilePath() + "\n");
+            }
         }
     }
 
@@ -484,15 +494,28 @@ public class TsbsTest {
             }
 
             // Initialize file output if specified
-            if (options.outputFilePath != null && !options.outputFilePath.trim().isEmpty()) {
-                String effectiveOutputPath = getEffectiveOutputFilePath(options.outputFilePath);
-                LogPrinter.openFile(effectiveOutputPath);
+            if ((options.logFilePath != null && !options.logFilePath.trim().isEmpty()) ||
+                    (options.jsonFilePath != null && !options.jsonFilePath.trim().isEmpty())) {
+
+                String effectiveLogPath = null;
+                String effectiveJsonPath = null;
+
+                if (options.logFilePath != null && !options.logFilePath.trim().isEmpty()) {
+                    effectiveLogPath = getEffectiveOutputFilePath(options.logFilePath);
+                }
+
+                if (options.jsonFilePath != null && !options.jsonFilePath.trim().isEmpty()) {
+                    effectiveJsonPath = getEffectiveOutputFilePath(options.jsonFilePath);
+                }
+
+                LogPrinter.openFiles(effectiveLogPath, effectiveJsonPath);
             }
 
             LogPrinter.log("Current working directory: " + System.getProperty("user.dir"));
-            LogPrinter.log("Output file path: " +
-                    (LogPrinter.isOutputToFile() ? LogPrinter.getOutputFilePath()
-                            : "Not specified (console only)"));
+            LogPrinter.log("Log file path: " +
+                    (LogPrinter.getLogFilePath() != null ? LogPrinter.getLogFilePath() : "Not specified"));
+            LogPrinter.log("JSON file path: " +
+                    (LogPrinter.getJsonFilePath() != null ? LogPrinter.getJsonFilePath() : "Not specified"));
             LogPrinter.log("Parallelism level: " + options.parallelism);
             LogPrinter.log("Reading mode: " + (options.useSharedQueue ? "Shared Queue" : "Direct Reading"));
 
@@ -619,7 +642,7 @@ public class TsbsTest {
                 TsbsSourceFunction.shutdownAll();
             }
             // Close file output
-            LogPrinter.closeFile();
+            LogPrinter.closeFiles();
         }
     }
 }

@@ -1,3 +1,5 @@
 target/
 tsbs-flink-results.txt
+tsbs-flink-log.txt
+tsbs-flink-result.txt
 *.tar.gz
