@@ -378,9 +378,9 @@ public class TsbsTest {
             e.printStackTrace();
         }
 
-        LogPrinter.log("   - Waiting 1000 ms for resource release...");
+        LogPrinter.log("   - Waiting 3000 ms for resource release...");
         try {
-            Thread.sleep(10000);
+            Thread.sleep(3000);
             LogPrinter.log("   - Resource release wait completed");
         } catch (InterruptedException e) {
             LogPrinter.log("   - Resource release wait interrupted");
@@ -517,7 +517,7 @@ public class TsbsTest {
     public static void generateLogReport(List<TestResult> results, TestSuiteSummary summary) {
         LogPrinter.log("Detailed test results summary report");
         LogPrinter.log("==========================================");
-        SimpleDateFormat timeFormat = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
+        SimpleDateFormat timeFormat = new SimpleDateFormat("HH:mm:ss.SSS");
 
         // Group results by classification
         Map<String, List<TestResult>> resultsByClassification = new HashMap<>();
@@ -544,14 +544,14 @@ public class TsbsTest {
         // Detailed results table
         LogPrinter.log("Detailed results list:");
         LogPrinter.log(
-                "| Scenario ID | Classification | Records   | Data Records | Start Time              | End Time                | Duration(ms) | Throughput(rec/s) | Status |");
+                "| Scenario ID | Classification | Records   | Data Records | Start Time   | End Time     | Duration(ms) | Throughput(rec/s) | Status |");
         LogPrinter.log(
-                "|-------------|----------------|-----------|--------------|-------------------------|-------------------------|--------------|-------------------|--------|");
+                "|-------------|----------------|-----------|--------------|--------------|--------------|--------------|-------------------|--------|");
 
         for (TestResult result : results) {
             String status = result.success ? "Passed" : "Failed";
 
-            LogPrinter.log(String.format("| %-11s | %-14s | %9d | %12d | %-19s | %-18s | %12d | %17.2f | %s |",
+            LogPrinter.log(String.format("| %-11s | %-14s | %9d | %12d | %-8s | %-7s | %12d | %17.2f | %s |",
                     result.scenarioId,
                     result.classification,
                     result.recordsProcessed,
@@ -634,14 +634,14 @@ public class TsbsTest {
                     String.format("%.2f", results.stream().mapToLong(r -> r.duration).average().orElse(0)));
 
             double totalThroughput = 0.0;
-            long totalDataRecords = 0;
+            long totalRecords = 0;
             for (TestResult result : results) {
-                totalDataRecords += result.recordsInput;
+                totalRecords += result.recordsInput;
             }
             if (summary.totalDuration > 0) {
-                totalThroughput = totalDataRecords * 1000.0 / summary.totalDuration;
+                totalThroughput = totalRecords * 1000.0 / summary.totalDuration;
             }
-            summaryInfo.put("totalDataRecords", totalDataRecords);
+            summaryInfo.put("totalRecords", totalRecords);
             summaryInfo.put("overallThroughput", String.format("%.2f", totalThroughput));
 
             if (!results.isEmpty()) {
