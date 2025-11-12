@@ -654,7 +654,7 @@ testCases:
                   COUNT(S.ts) AS count_s,
                   S.fault_state AS fault_state
               ONE ROW PER MATCH
-              AFTER MATCH SKIP PAST LAST ROW
+              AFTER MATCH SKIP TO LAST E
               PATTERN (S+ E)
               DEFINE
                   S AS (S.fault_state = 1),
@@ -696,7 +696,7 @@ testCases:
                   COUNT(S.ts) AS data_points,
                   S.low_fuel_state AS low_fuel_state
               ONE ROW PER MATCH
-              AFTER MATCH SKIP PAST LAST ROW
+              AFTER MATCH SKIP TO LAST E
               PATTERN (S+ E)
               DEFINE
                   S AS (S.low_fuel_state = 1),
@@ -835,7 +835,7 @@ testCases:
                   COUNT(S.ts) AS data_points,
                   S.full_tank_state as full_tank_state
               ONE ROW PER MATCH
-              AFTER MATCH SKIP PAST LAST ROW
+              AFTER MATCH SKIP TO LAST E
               PATTERN (S+ E)
               DEFINE
                   S AS (S.full_tank_state = 1),
