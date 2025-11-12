@@ -7,6 +7,8 @@ import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.api.TableResult;
 import org.apache.flink.util.CloseableIterator;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.CoreOptions;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
@@ -39,6 +41,9 @@ public class TsbsTest {
 
         @Parameter(names = { "-c", "--config" }, description = "Test YAML configuration file path")
         public String configFilePath = null;
+
+        @Parameter(names = { "-pc", "--parallelism-config" }, description = "Parallelism configuration YAML file path")
+        public String parallelismConfigFilePath = null;
 
         @Parameter(names = { "-s", "--scenario" }, description = "Execute specific scenario ID only")
         public String scenarioId = null;
@@ -84,6 +89,22 @@ public class TsbsTest {
 
             @JsonProperty("sql")
             public String sql;
+        }
+    }
+
+    /**
+     * Parallelism Configuration Class - YAML format
+     */
+    public static class ParallelismConfig {
+        @JsonProperty("testCases")
+        public List<ParallelismTestCase> testCases;
+
+        public static class ParallelismTestCase {
+            @JsonProperty("scenarioId")
+            public String scenarioId;
+
+            @JsonProperty("parallelism")
+            public Integer parallelism;
         }
     }
 
@@ -152,6 +173,32 @@ public class TsbsTest {
 
         try (InputStream is = inputStream) {
             return mapper.readValue(is, TestCaseConfig.class);
+        }
+    }
+
+    /**
+     * Load parallelism configuration file
+     */
+    public static ParallelismConfig loadParallelismConfig(String configPath) throws Exception {
+        ObjectMapper mapper = new ObjectMapper(new YAMLFactory());
+
+        File configFile = new File(configPath);
+        InputStream inputStream;
+
+        if (configFile.exists()) {
+            inputStream = new FileInputStream(configFile);
+            LogPrinter.log("External parallelism configuration file loaded: " + configFile.getAbsolutePath());
+        } else {
+            inputStream = TsbsTest.class.getClassLoader().getResourceAsStream(configPath);
+            if (inputStream == null) {
+                throw new IllegalArgumentException("Parallelism configuration file not found: " + configPath +
+                        "\nCurrent working directory: " + System.getProperty("user.dir"));
+            }
+            LogPrinter.log("Embedded parallelism configuration file loaded: " + configPath);
+        }
+
+        try (InputStream is = inputStream) {
+            return mapper.readValue(is, ParallelismConfig.class);
         }
     }
 
@@ -291,6 +338,7 @@ public class TsbsTest {
      */
     public static TestSuiteSummary executeTestSuite(StreamTableEnvironment tableEnv,
             TestCaseConfig config,
+            ParallelismConfig parallelismConfig,
             String specificScenarioId,
             Integer parallelism,
             Boolean useSharedQueue) {
@@ -324,8 +372,17 @@ public class TsbsTest {
         LogPrinter.log("Starting test suite execution");
         LogPrinter.log("Number of test cases to execute: " + testCasesToExecute.size());
         LogPrinter.log("Suite start time: " + new Date(summary.totalStartTime));
-        LogPrinter.log("Parallelism level: " + parallelism);
+        LogPrinter.log("Base parallelism level: " + parallelism);
         LogPrinter.log("Reading mode: " + (useSharedQueue ? "Shared Queue" : "Direct Reading"));
+
+        // Create parallelism mapping for efficient lookup
+        Map<String, Integer> parallelismMap = new HashMap<>();
+        if (parallelismConfig != null && parallelismConfig.testCases != null) {
+            for (ParallelismConfig.ParallelismTestCase ptc : parallelismConfig.testCases) {
+                parallelismMap.put(ptc.scenarioId, ptc.parallelism);
+            }
+            LogPrinter.log("Parallelism configuration loaded for " + parallelismMap.size() + " scenarios");
+        }
 
         Map<String, List<TestCaseConfig.TestCase>> casesByClassification = new HashMap<>();
         for (TestCaseConfig.TestCase testCase : testCasesToExecute) {
@@ -344,6 +401,27 @@ public class TsbsTest {
             TestCaseConfig.TestCase testCase = testCasesToExecute.get(i);
             LogPrinter.log("Execution progress: (" + (i + 1) + "/" + testCasesToExecute.size() + ")");
 
+            // Determine effective parallelism for this test case
+            Integer effectiveParallelism = parallelism;
+            if (parallelismMap.containsKey(testCase.scenarioId)) {
+                Integer configParallelism = parallelismMap.get(testCase.scenarioId);
+                if (configParallelism != null && configParallelism != -1) {
+                    effectiveParallelism = configParallelism;
+                    LogPrinter.log("   - Using configured parallelism: " + effectiveParallelism);
+                } else {
+                    LogPrinter.log("   - Using base parallelism: " + effectiveParallelism);
+                }
+            } else {
+                LogPrinter.log("   - Using base parallelism: " + effectiveParallelism);
+            }
+
+            // Set parallelism for this test case
+            StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+            env.setParallelism(effectiveParallelism);
+
+            Configuration tableConfig = tableEnv.getConfig().getConfiguration();
+            tableConfig.set(CoreOptions.DEFAULT_PARALLELISM, effectiveParallelism);
+
             TestResult result = executeTestCase(tableEnv, testCase, useSharedQueue);
             results.add(result);
 
@@ -361,7 +439,7 @@ public class TsbsTest {
         LogPrinter.log("==========================================");
         LogPrinter.log("Test suite execution completed");
         LogPrinter.log("Total duration: " + summary.totalDuration + "ms");
-        LogPrinter.log("Parallelism: " + parallelism);
+        LogPrinter.log("Base parallelism: " + parallelism);
         LogPrinter.log("Reading mode: " + (useSharedQueue ? "Shared Queue" : "Direct Reading"));
         LogPrinter.log("==========================================\n\n");
 
@@ -603,7 +681,6 @@ public class TsbsTest {
                 LogPrinter.log("Using embedded default diagnostics data file: " + effectiveDataFilePath2);
             }
 
-            // Determine config file path
             String effectiveConfigFilePath;
             if (options.configFilePath != null && new File(options.configFilePath).exists()) {
                 effectiveConfigFilePath = options.configFilePath;
@@ -613,13 +690,20 @@ public class TsbsTest {
                 LogPrinter.log("Using embedded default config file: " + effectiveConfigFilePath);
             }
 
+            String effectiveParallelismConfigFilePath;
+            if (options.parallelismConfigFilePath != null && new File(options.parallelismConfigFilePath).exists()) {
+                effectiveParallelismConfigFilePath = options.parallelismConfigFilePath;
+                LogPrinter.log("Using external parallelism config file: " + effectiveParallelismConfigFilePath);
+            } else {
+                effectiveParallelismConfigFilePath = "config/default_cases_cfg.yaml";
+                LogPrinter.log("Using embedded default config file: " + effectiveParallelismConfigFilePath);
+            }
+
             // Initialize Flink environment with custom parallelism
             StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
             StreamTableEnvironment tableEnv = StreamTableEnvironment.create(env);
-            env.setParallelism(options.parallelism);
 
             LogPrinter.log("Initializing Flink test environment");
-            LogPrinter.log("Parallelism: " + env.getParallelism());
 
             // Create test table
             String createTableDDL = "CREATE TABLE readings (\n" +
@@ -680,8 +764,14 @@ public class TsbsTest {
             LogPrinter.log("Test configuration loaded successfully");
             LogPrinter.log("Total test cases loaded: " + config.testCases.size());
 
+            // Load parallelism configuration if specified
+            ParallelismConfig parallelismConfig = loadParallelismConfig(effectiveParallelismConfigFilePath);
+            ;
+            LogPrinter.log("Parallelism configuration loaded successfully");
+            LogPrinter.log("Total test cases config loaded: " + parallelismConfig.testCases.size());
+
             // Execute test suite with all parameters
-            TestSuiteSummary summary = executeTestSuite(tableEnv, config, options.scenarioId,
+            TestSuiteSummary summary = executeTestSuite(tableEnv, config, parallelismConfig, options.scenarioId,
                     options.parallelism, options.useSharedQueue);
 
             int exitCode = summary.failedCases > 0 ? 1 : 0;

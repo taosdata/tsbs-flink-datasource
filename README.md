@@ -297,18 +297,19 @@ SELECT * FROM readings;
 
 The project supports the following command-line parameters:
 
-| Parameter      | Short | Description                       | Default Value            |
-| -------------- | ----- | --------------------------------- | ------------------------ |
-| --config       | -c    | Test case configuration file path | Built-in default config  |
-| --data1        | -d1   | Readings data file path           | Built-in default data    |
-| --data2        | -d2   | Diagnostics data file path        | Built-in default data    |
-| --log-output   | -l    | Log file output path              | ./tsbs-flink-log.txt     |
-| --json-output  | -j    | JSON result file output path      | ./tsbs-flink-result.json |
-| --scenario     | -s    | Execute specific test scenario    | All scenarios            |
-| --parallelism  | -p    | Flink parallelism level           | 4                        |
-| --shared-queue | -q    | Use shared queue mode             | false                    |
-| --help         | -h    | Show help information             | -                        |
-| --version      | -v    | Show version information          | -                        |
+| Parameter             | Short | Description                         | Default Value            |
+| --------------------- | ----- | ----------------------------------- | ------------------------ |
+| --config              | -c    | Test case configuration file path   | Built-in default config  |
+| --data1               | -d1   | Readings data file path             | Built-in default data    |
+| --data2               | -d2   | Diagnostics data file path          | Built-in default data    |
+| --log-output          | -l    | Log file output path                | ./tsbs-flink-log.txt     |
+| --json-output         | -j    | JSON result file output path        | ./tsbs-flink-result.json |
+| --scenario            | -s    | Execute specific test scenario      | All scenarios            |
+| --parallelism         | -p    | Flink parallelism level             | 4                        |
+| --parallelism-config  | -pc   | Parallelism configuration file path | Built-in default config  |
+| --shared-queue        | -q    | Use shared queue mode               | false                    |
+| --help                | -h    | Show help information               | -                        |
+| --version             | -v    | Show version information            | -                        |
 
 ## 7.2 Execute Test Examples
 
@@ -329,7 +330,8 @@ $FLINK_HOME/bin/flink run target/tsbs-flink-datasource-1.0-SNAPSHOT.jar \
     --data2 /path/to/diagnostics.csv \
     --log-output ./custom-log.txt \
     --json-output ./custom-results.json \
-    --parallelism 8
+    --parallelism 8 \
+    --parallelism-config /path/to/parallelism_config.yaml
 
 ```
 
