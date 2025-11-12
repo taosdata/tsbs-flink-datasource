@@ -10,7 +10,7 @@ testCases:
     - scenarioId: "A5"
       parallelism: 40
     - scenarioId: "A6"
-      parallelism: 20
+      parallelism: 10
     - scenarioId: "A7"
       parallelism: 40
     - scenarioId: "A8"

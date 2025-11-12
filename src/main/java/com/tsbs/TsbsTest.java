@@ -361,7 +361,7 @@ public class TsbsTest {
                 result.throughput = recordsInput * 1000.0 / result.duration;
             }
 
-            LogPrinter.log("   - Test passed - Records processed: " + result.recordsProcessed +
+            LogPrinter.log("   - Test passed - Records output: " + result.recordsProcessed +
                     " | Duration: " + result.duration + "ms | " +
                     "Throughput: " + String.format("%.2f", result.throughput) + " records/sec");
 

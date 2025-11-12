@@ -289,7 +289,7 @@ testCases:
                   window_start,
                   window_end,
                   fleet,
-                  COALESCE(AVG(fuel_consumption), 0) AS avg_fuel
+                  AVG(fuel_consumption) AS avg_fuel
               FROM TABLE(
                   TUMBLE(TABLE readings, DESCRIPTOR(ts), INTERVAL '1' DAY)
               )
@@ -301,7 +301,7 @@ testCases:
                   window_start,
                   window_end,
                   fleet,
-                  COALESCE(AVG(current_load), 0) AS avg_load
+                  AVG(current_load) AS avg_load
               FROM TABLE(
                   TUMBLE(TABLE diagnostics, DESCRIPTOR(ts), INTERVAL '1' DAY)
               )
@@ -534,8 +534,8 @@ testCases:
           SELECT
               name,
               slope_interval,
-              (COALESCE(sum_s_fuel, 0) + COALESCE(sum_c_fuel, 0))  / (count_s + count_c) AS avg_fuel_consumption,
-              (COALESCE(sum_s_velocity, 0) + COALESCE(sum_c_velocity, 0)) / (count_s + count_c) AS avg_velocity,
+              (sum_s_fuel + sum_c_fuel)  / (count_s + count_c) AS avg_fuel_consumption,
+              (sum_s_velocity + sum_c_velocity) / (count_s + count_c) AS avg_velocity,
               segment_start,
               segment_end,
               (count_s + count_c) AS data_points
@@ -582,8 +582,8 @@ testCases:
           SELECT
               name,
               velocity_interval,
-              (COALESCE(sum_s_fuel, 0) + COALESCE(sum_c_fuel, 0)) / (count_s + count_c) AS avg_fuel_consumption,
-              (COALESCE(sum_s_velocity, 0) + COALESCE(sum_c_velocity, 0)) / (count_s + count_c) AS avg_velocity,
+              (sum_s_fuel + sum_c_fuel) / (count_s + count_c) AS avg_fuel_consumption,
+              (sum_s_velocity + sum_c_velocity) / (count_s + count_c) AS avg_velocity,
               segment_start,
               segment_end,
               (count_s + count_c) AS data_points
