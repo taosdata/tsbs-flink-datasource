@@ -534,7 +534,7 @@ testCases:
           SELECT
               name,
               slope_interval,
-              (COALESCE(sum_s_fuel, 0) + COALESCE(sum_c_fuel, 0))  / (count_s + count_c) AS avg_fuel_consumption,
+              (COALESCE(sum_s_fuel, 0) + COALESCE(sum_c_fuel, 0)) / (count_s + count_c) AS avg_fuel_consumption,
               (COALESCE(sum_s_velocity, 0) + COALESCE(sum_c_velocity, 0)) / (count_s + count_c) AS avg_velocity,
               segment_start,
               segment_end,
@@ -745,7 +745,7 @@ testCases:
                   COUNT(S.ts) AS data_points,
                   S.fuel_consumption_severity AS fuel_consumption_severity
               ONE ROW PER MATCH
-              AFTER MATCH SKIP TO LAST E  
+              AFTER MATCH SKIP TO LAST E
               PATTERN (S+ E)
               DEFINE
                   S AS (S.fuel_consumption_severity = 1),

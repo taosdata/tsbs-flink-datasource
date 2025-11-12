@@ -46,7 +46,7 @@ testCases:
     - scenarioId: "T6"
       parallelism: 40
     - scenarioId: "T7"
-      parallelism: 40
+      parallelism: 20
     - scenarioId: "T8"
       parallelism: 40
     - scenarioId: "T9"
