@@ -544,14 +544,14 @@ public class TsbsTest {
         // Detailed results table
         LogPrinter.log("Detailed results list:");
         LogPrinter.log(
-                "| Scenario ID | Classification | Records   | Data Records | Start Time   | End Time     | Duration(ms) | Throughput(rec/s) | Status |");
+                "| Scenario ID | Classification | Out Records | In Records  | Start Time   | End Time     | Duration(ms) | Throughput(rec/s) | Status |");
         LogPrinter.log(
-                "|-------------|----------------|-----------|--------------|--------------|--------------|--------------|-------------------|--------|");
+                "|-------------|----------------|-------------|-------------|--------------|--------------|--------------|-------------------|--------|");
 
         for (TestResult result : results) {
             String status = result.success ? "Passed" : "Failed";
 
-            LogPrinter.log(String.format("| %-11s | %-14s | %9d | %12d | %-8s | %-7s | %12d | %17.2f | %s |",
+            LogPrinter.log(String.format("| %-11s | %-14s | %11d | %11d | %-8s | %-7s | %12d | %17.2f | %s |",
                     result.scenarioId,
                     result.classification,
                     result.recordsProcessed,
