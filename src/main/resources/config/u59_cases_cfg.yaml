@@ -1,0 +1,53 @@
+testCases:
+    - scenarioId: "A1"
+      parallelism: 40
+    - scenarioId: "A2"
+      parallelism: 40
+    - scenarioId: "A3"
+      parallelism: 40
+    - scenarioId: "A4"
+      parallelism: 40
+    - scenarioId: "A5"
+      parallelism: 40
+    - scenarioId: "A6"
+      parallelism: 10
+    - scenarioId: "A7"
+      parallelism: 40
+    - scenarioId: "A8"
+      parallelism: 40
+    - scenarioId: "A9"
+      parallelism: 40
+    - scenarioId: "F1"
+      parallelism: 40
+    - scenarioId: "F2"
+      parallelism: 40
+    - scenarioId: "F3"
+      parallelism: 40
+    - scenarioId: "F4"
+      parallelism: 40
+    - scenarioId: "F5"
+      parallelism: 40
+    - scenarioId: "F6"
+      parallelism: 40
+    - scenarioId: "F7"
+      parallelism: 40
+    - scenarioId: "F8"
+      parallelism: 40
+    - scenarioId: "T1"
+      parallelism: 40
+    - scenarioId: "T2"
+      parallelism: 40
+    - scenarioId: "T3"
+      parallelism: 40
+    - scenarioId: "T4"
+      parallelism: 40
+    - scenarioId: "T5"
+      parallelism: 40
+    - scenarioId: "T6"
+      parallelism: 40
+    - scenarioId: "T7"
+      parallelism: 20
+    - scenarioId: "T8"
+      parallelism: 40
+    - scenarioId: "T9"
+      parallelism: 40

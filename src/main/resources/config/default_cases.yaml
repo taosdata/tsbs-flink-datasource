@@ -534,7 +534,7 @@ testCases:
           SELECT
               name,
               slope_interval,
-              (COALESCE(sum_s_fuel, 0) + COALESCE(sum_c_fuel, 0))  / (count_s + count_c) AS avg_fuel_consumption,
+              (COALESCE(sum_s_fuel, 0) + COALESCE(sum_c_fuel, 0)) / (count_s + count_c) AS avg_fuel_consumption,
               (COALESCE(sum_s_velocity, 0) + COALESCE(sum_c_velocity, 0)) / (count_s + count_c) AS avg_velocity,
               segment_start,
               segment_end,
@@ -654,7 +654,7 @@ testCases:
                   COUNT(S.ts) AS count_s,
                   S.fault_state AS fault_state
               ONE ROW PER MATCH
-              AFTER MATCH SKIP PAST LAST ROW
+              AFTER MATCH SKIP TO LAST E
               PATTERN (S+ E)
               DEFINE
                   S AS (S.fault_state = 1),
@@ -696,7 +696,7 @@ testCases:
                   COUNT(S.ts) AS data_points,
                   S.low_fuel_state AS low_fuel_state
               ONE ROW PER MATCH
-              AFTER MATCH SKIP PAST LAST ROW
+              AFTER MATCH SKIP TO LAST E
               PATTERN (S+ E)
               DEFINE
                   S AS (S.low_fuel_state = 1),
@@ -745,7 +745,7 @@ testCases:
                   COUNT(S.ts) AS data_points,
                   S.fuel_consumption_severity AS fuel_consumption_severity
               ONE ROW PER MATCH
-              AFTER MATCH SKIP TO LAST E  
+              AFTER MATCH SKIP TO LAST E
               PATTERN (S+ E)
               DEFINE
                   S AS (S.fuel_consumption_severity = 1),
@@ -835,7 +835,7 @@ testCases:
                   COUNT(S.ts) AS data_points,
                   S.full_tank_state as full_tank_state
               ONE ROW PER MATCH
-              AFTER MATCH SKIP PAST LAST ROW
+              AFTER MATCH SKIP TO LAST E
               PATTERN (S+ E)
               DEFINE
                   S AS (S.full_tank_state = 1),
